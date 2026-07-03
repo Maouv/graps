@@ -91,17 +91,10 @@
         ${usedBy.map(f => '<div class="popover-used">' + esc(f) + '</div>').join('')}
       </div>` : ''}
       ${node.supported === false ? `
-      <div class="popover-ghost-hint">
+      <div class="popover-ghost-hint" data-action="expand">
         📁 ${esc(getDirectory(node.id))} — click to open directory
       </div>` : ''}
     `;
-
-    // Ghost node: click popover → expand directory
-    if (node.supported === false) {
-      el.addEventListener("click", () => {
-        if (window.graps.sidebar) window.graps.sidebar.expandDirectory(getDirectory(node.id));
-      });
-    }
 
     // Expand icon → open side panel
     el.querySelector(".popover-expand")?.addEventListener("click", (e) => {
@@ -445,6 +438,14 @@
         panelEl.classList.remove("open");
         panelEl.setAttribute("aria-hidden", "true");
       }
+    });
+
+    // Delegated: ghost node popover click → expand directory
+    document.getElementById("node-popover")?.addEventListener("click", (e) => {
+      const hint = e.target.closest("[data-action=\"expand\"]");
+      if (!hint) return;
+      const dirName = hint.textContent.replace(/^.*?📁\s*/, "").replace(/\s*—.*$/, "").trim();
+      if (dirName && window.graps.sidebar) window.graps.sidebar.expandDirectory(dirName);
     });
   }
 

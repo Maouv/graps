@@ -489,7 +489,7 @@ if __name__ == "__main__":
             class _FakeOK:
                 name = "fake"
                 last_ctx = ""
-                def chat(self, messages, context):
+                def chat(self, messages: list[dict[str, str]], context: str) -> str:
                     _FakeOK.last_ctx = context
                     return "debug answer"
 
@@ -507,7 +507,7 @@ if __name__ == "__main__":
             # 7. Mocked auth_failed → error_type.
             class _FakeAuthFail:
                 name = "fake"
-                def chat(self, messages, context):
+                def chat(self, messages: list[dict[str, str]], context: str) -> str:
                     raise AIError("auth_failed")
 
             provider_module.get_provider = lambda: _FakeAuthFail()  # type: ignore[assignment,return-value]

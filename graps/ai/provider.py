@@ -98,9 +98,12 @@ class AnthropicProvider(AIProvider):
                 model=self.model,
                 max_tokens=1024,
                 system=context,
-                messages=messages,
+                messages=messages,  # type: ignore[arg-type]  # ponytail: dict works at runtime
             )
-            text = resp.content[0].text
+            text = next(
+                (b.text for b in resp.content if hasattr(b, "text") and getattr(b, "type", "") == "text"),
+                "",
+            )
         except anthropic.AuthenticationError as e:
             logger.warning(type(e).__name__)
             raise AIError("auth_failed")
@@ -137,9 +140,9 @@ class OpenAIProvider(AIProvider):
             client = OpenAI(api_key=key, timeout=30.0)
             resp = client.chat.completions.create(
                 model=self.model,
-                messages=[{"role": "system", "content": context}, *messages],
+                messages=[{"role": "system", "content": context}, *messages],  # type: ignore[list-item]  # ponytail: dict works at runtime
             )
-            text = resp.choices[0].message.content
+            text = resp.choices[0].message.content or ""
         except openai.AuthenticationError as e:
             logger.warning(type(e).__name__)
             raise AIError("auth_failed")

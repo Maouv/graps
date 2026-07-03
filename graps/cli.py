@@ -235,7 +235,7 @@ def main(
         typer.echo(f"  Port {port} already in use. Try: graps . --port {port + 1}")
         raise typer.Exit(1)
 
-    fastapi_app = create_app(graph, port=port, host=host, cache_path=cache_path, scan_root=path)
+    fastapi_app = create_app(graph, port=port, host=host, cache_path=cache_path, scan_root=root)
 
     # Banner nunjukin bind asli (0.0.0.0 = denger semua interface, bukan
     # cuma loopback). webbrowser.open gak bisa buka 0.0.0.0 langsung → itu

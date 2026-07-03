@@ -20,14 +20,14 @@ def test_warn_if_cache_not_ignored__warns_when_absent(tmp_path, capsys):
     cli._warn_if_cache_not_ignored(tmp_path)
     out = capsys.readouterr().out
     assert ".graps/" in out, out
-    assert "belum ada di .gitignore" in out, out
+    assert "is not yet in .gitignore" in out, out
 
 
 def test_warn_if_cache_not_ignored__silent_when_listed(tmp_path, capsys):
     (tmp_path / ".gitignore").write_text(".graps/\nnode_modules/\n")
     cli._warn_if_cache_not_ignored(tmp_path)
     out = capsys.readouterr().out
-    assert "belum ada di .gitignore" not in out, out
+    assert "is not yet in .gitignore" not in out, out
 
 
 def test_write_cache__concurrent_different_keys_all_present(tmp_path):
