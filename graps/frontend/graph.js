@@ -64,9 +64,24 @@
   }
 
   function nodeHeight(n, zoomK) {
-    if (zoomK < 0.5) return NODE_HEIGHT_BASE;
+    // Tier sinkron dengan LOD drawNode: k < 0.7 → box pendek (header only),
+    // k ≥ 0.7 → box tinggi (header + function list).
+    if (zoomK < 0.7) return NODE_HEIGHT_BASE;
     const fns = (n.functions || []).slice(0, 5);
     return NODE_HEIGHT_BASE + fns.length * NODE_LINE_HEIGHT + 8;
+  }
+
+  // Text overflow ellipsis: potong text + "…" bila measureText > maxWidth.
+  // Wajib set ctx.font SEBELUM panggil (measureText pakai font aktif).
+  // ponytail: iterasi char O(n) per draw, <500 node → cukup. Upgrade ke binary
+  // search kalau nama panjang + frame drop terasa.
+  function clipText(text, maxWidth) {
+    if (ctx.measureText(text).width <= maxWidth) return text;
+    const ell = "…";
+    if (ctx.measureText(ell).width >= maxWidth) return ell;
+    let i = text.length;
+    while (i > 0 && ctx.measureText(text.slice(0, i) + ell).width > maxWidth) i--;
+    return i > 0 ? text.slice(0, i) + ell : ell;
   }
 
   // Phase B: rectangle hit detection
@@ -231,12 +246,13 @@
         drawArrow(arrowPt.x, arrowPt.y, dx, dy, color, k);
       }
 
-      // Circular warning label
-      if (edgeType === "circular" && alpha >= 0.18) {
+      // Circular warning label — zoom-aware (font world-constant, skala ikut zoom).
+      // Sembunyi saat zoom out jauh (k < 0.3), konsisten dengan LOD node.
+      if (edgeType === "circular" && alpha >= 0.18 && k >= 0.3) {
         const midX = (s.x + t.x) / 2;
-        const midY = (s.y + t.y) / 2 - 10 / k;
+        const midY = (s.y + t.y) / 2 - 10;
         ctx.fillStyle = EDGE_COLORS.circular;
-        ctx.font = (500) + " " + (10 / k) + "px Sora, sans-serif";
+        ctx.font = "500 10px Sora, sans-serif";
         ctx.fillText("⚠ circular", midX, midY);
       }
     }
@@ -310,39 +326,48 @@
         ctx.shadowBlur = 0;
       }
 
-      // Filename header
-      ctx.fillStyle = INK_PRIMARY;
-      ctx.font = "600 " + (12 / k) + "px Sora, sans-serif";
-      const fname = n.id.split("/").pop() || n.id;
-      ctx.fillText(fname, x + NODE_PADDING, y + 16 / k);
+      // Level of detail (LOD), zoom-aware:
+      //   k < 0.3        → no text (warna node saja, orientasi via risk ring)
+      //   0.3 ≤ k < 0.7  → filename header only
+      //   k ≥ 0.7        → header + function list + import count
+      // Font world-constant (bukan /k) → teks skala seragam ikut zoom, konsisten
+      // dengan nodeWidth/nodeHeight yang juga world-space. Fix root cause bug
+      // "teks ga responsif & keluar node".
+      if (k >= 0.3) {
+        // Filename header
+        ctx.fillStyle = INK_PRIMARY;
+        ctx.font = "600 12px Sora, sans-serif";
+        const fname = n.id.split("/").pop() || n.id;
+        ctx.fillText(clipText(fname, w - NODE_PADDING * 2), x + NODE_PADDING, y + 16);
 
-      // Details when zoomed in
-      if (k >= 0.5) {
-        // Divider
-        ctx.strokeStyle = BG_BORDER;
-        ctx.lineWidth = 1 / k;
-        ctx.beginPath();
-        ctx.moveTo(x, y + NODE_HEIGHT_BASE - 8);
-        ctx.lineTo(x + w, y + NODE_HEIGHT_BASE - 8);
-        ctx.stroke();
+        if (k >= 0.7) {
+          // Divider
+          ctx.strokeStyle = BG_BORDER;
+          ctx.lineWidth = 1 / k;
+          ctx.beginPath();
+          ctx.moveTo(x, y + NODE_HEIGHT_BASE - 8);
+          ctx.lineTo(x + w, y + NODE_HEIGHT_BASE - 8);
+          ctx.stroke();
 
-        // Function list (max 5)
-        const fns = (n.functions || []).slice(0, 5);
-        ctx.fillStyle = INK_SECONDARY;
-        ctx.font = "400 " + (10 / k) + "px JetBrains Mono, monospace";
-        fns.forEach((fn, i) => {
-          ctx.fillText("ƒ " + fn.name, x + NODE_PADDING, y + NODE_HEIGHT_BASE + i * NODE_LINE_HEIGHT);
-        });
-        if ((n.functions || []).length > 5) {
-          ctx.fillStyle = INK_MUTED;
-          ctx.fillText("+" + ((n.functions || []).length - 5) + " more", x + NODE_PADDING, y + NODE_HEIGHT_BASE + 5 * NODE_LINE_HEIGHT);
-        }
+          // Function list (max 5) — ellipsis bila nama panjang keluar node
+          const fns = (n.functions || []).slice(0, 5);
+          ctx.fillStyle = INK_SECONDARY;
+          ctx.font = "400 10px JetBrains Mono, monospace";
+          const fnMax = w - NODE_PADDING * 2;
+          fns.forEach((fn, i) => {
+            ctx.fillText(clipText("ƒ " + fn.name, fnMax), x + NODE_PADDING, y + NODE_HEIGHT_BASE + i * NODE_LINE_HEIGHT);
+          });
+          if ((n.functions || []).length > 5) {
+            ctx.fillStyle = INK_MUTED;
+            ctx.fillText("+" + ((n.functions || []).length - 5) + " more", x + NODE_PADDING, y + NODE_HEIGHT_BASE + 5 * NODE_LINE_HEIGHT);
+          }
 
-        // Import count
-        const importCount = (n.imports || []).length;
-        if (importCount > 0) {
-          ctx.fillStyle = INK_MUTED;
-          ctx.fillText("↳ " + importCount + " import" + (importCount > 1 ? "s" : ""), x + NODE_PADDING, y + h - 6);
+          // Import count
+          const importCount = (n.imports || []).length;
+          if (importCount > 0) {
+            ctx.fillStyle = INK_MUTED;
+            ctx.fillText(clipText("↳ " + importCount + " import" + (importCount > 1 ? "s" : ""), fnMax), x + NODE_PADDING, y + h - 6);
+          }
         }
       }
     }
@@ -385,7 +410,7 @@
 
   function initZoom() {
     zoomBehavior = d3.zoom()
-      .scaleExtent([0.2, 4])
+      .scaleExtent([0.3, 2.5])
       .on("zoom", (event) => {
         transform = { x: event.transform.x, y: event.transform.y, k: event.transform.k };
         draw();
