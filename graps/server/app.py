@@ -10,8 +10,11 @@ Module ini hanya tahu cara menyusun :class:`FastAPI` dengan:
   deprecation response; logic provider/cache tidak jalan),
 - mount static frontend di ``/`` (paling akhir supaya API tidak ke-shadow).
 
-Pinning host ``127.0.0.1`` adalah tanggung jawab caller (``cli.py``). Module
-ini cuma butuh ``port`` untuk membentuk daftar origin yang diizinkan.
+Default bind ``127.0.0.1`` (loopback) ditetapkan caller (``cli.py``) via
+param ``host``. Loopback → envelope security ketat (CORS + CSRF + DNS
+rebinding). Bind non-loopback (``0.0.0.0`` / IP LAN, untuk VPS) → user
+sengaja expose, middleware di-relax karena Host/Origin LAN gak akan pernah
+cocok ``localhost``.
 
 ponytail: tidak pakai ``APIRouter``/DI framework — semua route di satu file,
 ``cache_path`` + ``scan_root`` di-close-over dari ``create_app``. Pindah ke
@@ -273,6 +276,7 @@ def create_app(
     port: int,
     cache_path: Path | None = None,
     scan_root: Path | None = None,
+    host: str = "127.0.0.1",
 ) -> FastAPI:
     """Bangun :class:`FastAPI` lengkap dengan middleware, route, dan static mount.
 
@@ -290,14 +294,30 @@ def create_app(
         Path absolut untuk baca source dari disk (Option C). ``None`` untuk
         backward-compat test yang tidak butuh baca source. Tidak masuk graph
         JSON (M-03 aman — meta.root tetap relatif ".").
+    host:
+        Alamat bind uvicorn (default ``127.0.0.1``). Loopback
+        (``127.0.0.1``/``localhost``/``::1``) → CORS + ``enforce_origin`` +
+        ``validate_host`` aktif (envelope security ketat). Non-loopback
+        (mis. ``0.0.0.0`` untuk VPS/LAN) → ketiganya di-relax passthrough
+        karena user sengaja expose; tanggung jawab keamanan jadi milik user.
     """
     app = FastAPI()
-    allowed = (f"http://localhost:{port}", f"http://127.0.0.1:{port}")
+    # ponytail: loopback bind → envelope security ketat (CORS + CSRF + DNS
+    # rebinding). Bind ke 0.0.0.0/IP LAN (VPS) → user sengaja expose, middleware
+    # di-relax (allowed/host_ok kosong) karena Host/Origin LAN gak akan pernah
+    # cocok localhost. Default tetap aman 127.0.0.1 (BLUEPRINT H-01).
+    loopback = host in ("127.0.0.1", "localhost", "::1")
+    if loopback:
+        allowed: tuple[str, ...] = (f"http://localhost:{port}", f"http://127.0.0.1:{port}")
+        host_ok: tuple[str, ...] = (f"localhost:{port}", f"127.0.0.1:{port}")
+    else:
+        allowed = ()
+        host_ok = ()
 
     # CORS — Phase 1 hanya GET/POST, tidak ada cookie (allow_credentials=False).
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=list(allowed),
+        allow_origins=list(allowed) if loopback else ["*"],
         allow_credentials=False,
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type"],
@@ -311,8 +331,10 @@ def create_app(
         Browser selalu set Origin pada same-origin POST, jadi frontend tetap
         jalan; non-browser client (curl/script) yang omit Origin ditolak 403
         supaya tidak bisa bypass CSRF guard (report-bug-finder Finding 2).
+
+        Di-relax (passthrough) saat bind non-loopback — user sengaja expose.
         """
-        if request.method in ("POST", "PUT", "DELETE"):
+        if loopback and request.method in ("POST", "PUT", "DELETE"):
             origin = request.headers.get("origin", "")
             if origin not in allowed:
                 return JSONResponse({"error": "Forbidden"}, status_code=403)
@@ -320,10 +342,14 @@ def create_app(
 
     @app.middleware("http")
     async def validate_host(request: Request, call_next: Callable[[Request], Awaitable[Any]]) -> Any:
-        """DNS rebinding protection — Host header harus localhost/127.0.0.1."""
-        host = request.headers.get("host", "").lower()
-        if host not in (f"localhost:{port}", f"127.0.0.1:{port}"):
-            return JSONResponse({"error": "Invalid Host"}, status_code=400)
+        """DNS rebinding protection — Host header harus localhost/127.0.0.1.
+
+        Di-relax (passthrough) saat bind non-loopback.
+        """
+        if loopback:
+            h = request.headers.get("host", "").lower()
+            if h not in host_ok:
+                return JSONResponse({"error": "Invalid Host"}, status_code=400)
         return await call_next(request)
 
     @app.get("/api/graph")

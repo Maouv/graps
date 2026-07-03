@@ -126,6 +126,27 @@ def test_security__valid_127_host_passes(simple_graph, tmp_path):
     assert r.status_code == 200
 
 
+def test_security__non_loopback_host_relaxes_middleware(simple_graph, tmp_path):
+    """--host 0.0.0.0 (VPS/LAN) → Host/Origin dari IP non-loopback diterima.
+
+    Default (127.0.0.1) masih nolak Host/Origin asing — test ini cuma jaga
+    cabang relax-nya gak rusak kalau ada refactor.
+    """
+    lan = "192.168.1.10"
+    app = create_app(simple_graph, port=PORT, host="0.0.0.0",
+                     cache_path=tmp_path / "cache.json", scan_root=tmp_path)
+    client = TestClient(app, base_url=f"http://{lan}:{PORT}")
+    # GET dari LAN Host → 200 (validate_host di-relax).
+    r = client.get("/api/graph", headers=_hdr(host=f"{lan}:{PORT}"))
+    assert r.status_code == 200, r.status_code
+    # POST dari LAN Origin → 200 (enforce_origin di-relax). Cuma cek status,
+    # bukan isi body — env API key di mesin test bisa ter-set (enabled=True),
+    # yang diuji di sini cuma cabang relax middleware, bukan provider logic.
+    r = client.post("/api/ai/chat", json={"message": "hi"},
+                    headers=_hdr(host=f"{lan}:{PORT}", origin=f"http://{lan}:{PORT}"))
+    assert r.status_code == 200, r.status_code
+
+
 def test_security__post_invalid_origin_403(simple_graph, tmp_path, ai_body):
     r = _client(simple_graph, tmp_path).post(
         "/api/ai/summary", json=ai_body, headers=_hdr(host=f"127.0.0.1:{PORT}", origin="http://evil.com")

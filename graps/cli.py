@@ -104,11 +104,11 @@ def _count_risks(graph: dict[str, Any]) -> dict[str, int]:
     return counts
 
 
-def _port_free(port: int) -> bool:
-    """True kalau bisa bind 127.0.0.1:port (pre-flight check)."""
+def _port_free(port: int, host: str = "127.0.0.1") -> bool:
+    """True kalau bisa bind ``host:port`` (pre-flight check)."""
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        s.bind(("127.0.0.1", port))
+        s.bind((host, port))
         return True
     except OSError:
         return False
@@ -136,27 +136,28 @@ def _warn_if_cache_not_ignored(root: Path) -> None:
             return  # unreadable → skip warning silently
         if ".graps" not in content and ".graps/" not in content:
             typer.echo(
-                "  ⚠ .graps/ belum ada di .gitignore — "
-                "cache bisa berisi ringkasan AI dari source code kamu. "
-                "Tambahkan '.graps/' ke .gitignore?"
+                "  WARNING ⚠ graps/ is not yet in .gitignore "
+                "The cache can contain an AI summary of your source code. "
+                "Add '.graps/' to .gitignore?"
             )
 
 
 @app.command()
 def main(
-    path: str = typer.Argument(".", help="Direktori yang akan di-scan"),
+    path: str = typer.Argument(".", help="Directory to be scanned"),
     port: int = typer.Option(8765, "--port", help="Port HTTP server"),
-    no_browser: bool = typer.Option(False, "--no-browser", help="Jangan auto-open browser"),
-    no_cache: bool = typer.Option(False, "--no-cache", help="Pakai cache sementara (dihapus OS)"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Network address to bind (default 127.0.0.1; 0.0.0.0 to expose on LAN/VPS)"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Not auto open brower"),
+    no_cache: bool = typer.Option(False, "--no-cache", help="Cache deleted (deletee by OS)"),
     exclude: list[str] = typer.Option(  # noqa: B008
-        None, "--exclude", help="Pattern direktori yang di-skip (boleh berulang)",
+        None, "--exclude", help="Skipped directory pattern (may repeat)",
     ),
     ai_provider: str = typer.Option(
-        None, "--ai-provider", help="anthropic|openai — paksa satu provider",
+        None, "--ai-provider", help="use one provider ai (openai or anthropic)",
     ),
     version: bool = typer.Option(  # noqa: ARG001
         False, "--version", callback=_version_callback, is_eager=True,
-        help="Tampilkan versi dan keluar",
+        help="show version",
     ),
 ) -> None:
     """Scan PATH untuk file Python, jalankan server lokal + buka browser."""
@@ -168,10 +169,10 @@ def main(
 
     # Validasi PATH.
     if not root.exists() or not root.is_dir():
-        typer.echo(f"  ✗ Cannot read directory {path} — not found or not a directory")
+        typer.echo(f"  Cannot read directory {path} — not found or not a directory")
         raise typer.Exit(1)
     if not os.access(root, os.R_OK):
-        typer.echo(f"  ✗ Cannot read directory {path} — permission denied")
+        typer.echo(f"  Cannot read directory {path} — permission denied")
         raise typer.Exit(1)
 
     # Startup warning: cache .graps/ harus di-gitignore (BLUEPRINT H-03).
@@ -184,7 +185,7 @@ def main(
 
     files = _discover(root, excl)
     if not files:
-        typer.echo(f"  ✗ No supported files found in {path}")
+        typer.echo(f"  No supported files found in {path}")
         raise typer.Exit(1)
 
     # Scan + build.
@@ -230,23 +231,27 @@ def main(
         cache_path = None  # create_app pakai DEFAULT_CACHE_PATH
 
     # Pre-flight port check.
-    if not _port_free(port):
-        typer.echo(f"  ✗ Port {port} already in use. Try: graps . --port {port + 1}")
+    if not _port_free(port, host):
+        typer.echo(f"  Port {port} already in use. Try: graps . --port {port + 1}")
         raise typer.Exit(1)
 
-    fastapi_app = create_app(graph, port=port, cache_path=cache_path, scan_root=path)
+    fastapi_app = create_app(graph, port=port, host=host, cache_path=cache_path, scan_root=path)
 
-    typer.echo(f"  Server running at http://localhost:{port}")
+    # Banner nunjukin bind asli (0.0.0.0 = denger semua interface, bukan
+    # cuma loopback). webbrowser.open gak bisa buka 0.0.0.0 langsung → itu
+    # pakai loopback (0.0.0.0 tetep nge-bind 127.0.0.1).
+    typer.echo(f"  Server running at http://{host}:{port}")
     if not no_browser:
+        open_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
         typer.echo("  Opening browser...")
-        timer = threading.Timer(1.0, lambda: webbrowser.open(f"http://localhost:{port}"))
+        timer = threading.Timer(1.0, lambda: webbrowser.open(f"http://{open_host}:{port}"))
         timer.daemon = True  # ponytail: jangan block exit kalau server.run() gagal (Finding 6)
         timer.start()
     typer.echo("  Press Ctrl+C to stop")
     typer.echo("")
 
     config = uvicorn.Config(
-        fastapi_app, host="127.0.0.1", port=port, log_level="warning"
+        fastapi_app, host=host, port=port, log_level="warning"
     )
     server = uvicorn.Server(config)
     try:
@@ -257,7 +262,7 @@ def main(
         raise typer.Exit(0)
     except OSError as e:
         if e.errno == errno.EADDRINUSE:
-            typer.echo(f"  ✗ Port {port} already in use. Try: graps . --port {port + 1}")
+            typer.echo(f" Port {port} already in use. Try: graps . --port {port + 1}")
             raise typer.Exit(1)
         raise
 
