@@ -19,6 +19,12 @@
     tagsEl = document.getElementById("ai-tags");
 
     document.getElementById("ai-send")?.addEventListener("click", sendMessage);
+    // E1: chevron toggle AI bar
+    document.getElementById("ai-chevron")?.addEventListener("click", () => {
+      const cur = store.state.activePanel;
+      if (cur === 'ai') window.graps.setActivePanel(null);
+      else window.graps.setActivePanel('ai');
+    });
     inputEl?.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -26,10 +32,32 @@
       }
     });
 
+    // E1: mobile — tap/focus AI input → set active panel
+    inputEl?.addEventListener("focus", () => {
+      if (window.graps.setActivePanel) window.graps.setActivePanel('ai');
+    });
+    document.getElementById("ai-input-row")?.addEventListener("click", () => {
+      if (window.graps.setActivePanel) window.graps.setActivePanel('ai');
+    });
+
     store.addEventListener("change", (e) => {
       if (!e.detail.keys.includes("selectedNode")) return;
       const node = store.state.selectedNode;
       if (node) setImplicitTag(node.id);
+    });
+
+    // E1: mobile activePanel listener — expand/collapse AI bar
+    store.addEventListener("change", (e) => {
+      if (!e.detail.keys.includes("activePanel")) return;
+      const bar = document.getElementById("ai-bar");
+      if (!bar) return;
+      const isMobile = window.matchMedia("(max-width: 768px)").matches;
+      if (store.state.activePanel === "ai") {
+        bar.classList.add("open");
+        if (isMobile) inputEl?.focus();
+      } else {
+        bar.classList.remove("open");
+      }
     });
 
     inputEl?.addEventListener("input", (e) => {

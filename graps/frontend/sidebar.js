@@ -15,6 +15,14 @@
   function init() {
     sidebarEl = document.getElementById("dir-sidebar");
     if (!sidebarEl) return;
+
+    // E1: chevron toggle sidebar
+    document.getElementById("sidebar-chevron")?.addEventListener("click", () => {
+      const cur = store.state.activePanel;
+      if (cur === 'sidebar') window.graps.setActivePanel(null);
+      else window.graps.setActivePanel('sidebar');
+    });
+
     store.addEventListener("change", (e) => {
       if (e.detail.keys.includes("graph") || e.detail.keys.includes("openDirs")) {
         renderSidebar();
@@ -75,6 +83,8 @@
     else { next.add(dir); }
     setState({ openDirs: next });
     window.dispatchEvent(new CustomEvent("graps:dirs-changed"));
+    // E1: mobile orchestration — notify active panel
+    if (window.graps.setActivePanel) window.graps.setActivePanel('sidebar');
   }
 
   function expandDirectory(dir) {

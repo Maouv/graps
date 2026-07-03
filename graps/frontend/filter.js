@@ -36,6 +36,18 @@
   window.graps.store = store;
   window.graps.setState = setState;
 
+  // ponytail: mobile orchestration — max 1 overlay panel at a time.
+  // Desktop hanya tracking state. Mobile auto-close side panel saat switch.
+  function setActivePanel(name) {
+    const isMobile = window.matchMedia('(max-width: 768px)').matches;
+    if (isMobile && name !== 'sidepanel' && store.state.sidePanel) {
+      setState({ sidePanel: false, activePanel: name });
+      return;
+    }
+    setState({ activePanel: name });
+  }
+  window.graps.setActivePanel = setActivePanel;
+
   // Wire filter pills di top-bar setelah DOM ready.
   function wireFilterPills() {
     const pills = document.querySelectorAll(".filter-pill[data-filter]");

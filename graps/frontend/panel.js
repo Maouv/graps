@@ -281,6 +281,8 @@
     }
     panelEl.classList.add("open");
     panelEl.setAttribute("aria-hidden", "false");
+    // E1: mobile orchestration — track active panel
+    if (window.graps.setActivePanel) window.graps.setActivePanel('sidepanel');
 
     const fns = node.functions || [];
     const consts = node.constants || [];
@@ -355,6 +357,8 @@
         panelEl.classList.remove("open");
         panelEl.setAttribute("aria-hidden", "true");
         setState({ sidePanel: false });
+        // E1: reset active panel on close
+        if (window.graps.setActivePanel) window.graps.setActivePanel(null);
       });
     }
 
