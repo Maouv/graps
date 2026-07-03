@@ -721,5 +721,6 @@
     panTo: panTo,
     fit: fitToViewport,
     getNodes: () => nodes,
+    getTransform: () => transform,
   };
 })();
