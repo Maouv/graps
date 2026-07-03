@@ -37,13 +37,96 @@
   const EDGE_DEFAULT = "oklch(65% 0.008 75)";
   const EDGE_ACTIVE = "oklch(94% 0.006 75)";
 
+  // Phase B: edge colors
+  const EDGE_COLORS = {
+    imports:       "oklch(52% 0.15 145)",   // hijau
+    circular:      "oklch(58% 0.22 25)",    // merah
+    function_call: "oklch(55% 0.18 280)",   // biru/ungu
+  };
+
+  // Phase B: rectangle node sizing
+  const NODE_MIN_WIDTH = 140;
+  const NODE_HEIGHT_BASE = 44;
+  const NODE_LINE_HEIGHT = 18;
+  const NODE_PADDING = 10;
+  const BG_BORDER = "oklch(24% 0.008 75)";
+  const INK_PRIMARY = "oklch(94% 0.006 75)";
+  const INK_SECONDARY = "oklch(65% 0.008 75)";
+  const INK_MUTED = "oklch(42% 0.006 75)";
+
   function nodeRisk(n) {
     return n.risk_level || "clean";
   }
 
-  function nodeRadius(n) {
-    const deg = n._degree || 0;
-    return 8 + Math.min(deg * 1.2, 10);
+  function nodeWidth(n) {
+    const textWidth = ctx ? ctx.measureText(n.id.split('/').pop()).width : 100;
+    return Math.max(NODE_MIN_WIDTH, textWidth + NODE_PADDING * 2);
+  }
+
+  function nodeHeight(n, zoomK) {
+    if (zoomK < 0.5) return NODE_HEIGHT_BASE;
+    const fns = (n.functions || []).slice(0, 5);
+    return NODE_HEIGHT_BASE + fns.length * NODE_LINE_HEIGHT + 8;
+  }
+
+  // Phase B: rectangle hit detection
+  function nodeAt(clientX, clientY) {
+    if (!quadtree) return null;
+    const rect = canvas.getBoundingClientRect();
+    const sx = clientX - rect.left;
+    const sy = clientY - rect.top;
+    const wx = (sx - transform.x) / transform.k;
+    const wy = (sy - transform.y) / transform.k;
+
+    const found = quadtree.find(wx, wy, 120);
+    if (!found) return null;
+
+    const w = nodeWidth(found);
+    const h = nodeHeight(found, transform.k);
+    const nx = found.x - w / 2;
+    const ny = found.y - h / 2;
+
+    return (wx >= nx && wx <= nx + w && wy >= ny && wy <= ny + h) ? found : null;
+  }
+
+  // Phase B: rounded rectangle path helper
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
+
+  // Phase B: bezier edge + arrow helpers
+  function rectBorderIntersection(cx, cy, w, h, dx, dy) {
+    const hw = w / 2, hh = h / 2;
+    const scale = Math.min(hw / Math.abs(dx || 1e-9), hh / Math.abs(dy || 1e-9));
+    return { x: cx + dx * scale, y: cy + dy * scale };
+  }
+
+  function drawArrow(tx, ty, dx, dy, color, k) {
+    const angle = Math.atan2(dy, dx);
+    const size = 8 / k;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(
+      tx - size * Math.cos(angle - Math.PI / 6),
+      ty - size * Math.sin(angle - Math.PI / 6)
+    );
+    ctx.lineTo(
+      tx - size * Math.cos(angle + Math.PI / 6),
+      ty - size * Math.sin(angle + Math.PI / 6)
+    );
+    ctx.closePath();
+    ctx.fill();
   }
 
   function resize() {
@@ -63,27 +146,10 @@
   }
 
   function buildQuadtree() {
-    // ponytail: rebuild tiap tick. O(n) per tick; OK <500 nodes.
     quadtree = d3.quadtree()
       .x((d) => d.x)
       .y((d) => d.y)
       .addAll(nodes);
-  }
-
-  function nodeAt(clientX, clientY) {
-    if (!quadtree) return null;
-    const rect = canvas.getBoundingClientRect();
-    // Screen → world coords (inverse transform).
-    const sx = clientX - rect.left;
-    const sy = clientY - rect.top;
-    const wx = (sx - transform.x) / transform.k;
-    const wy = (sy - transform.y) / transform.k;
-    // Hit radius dalam world space (max radius + sedikit slack).
-    const found = quadtree.find(wx, wy, 22);
-    if (!found) return null;
-    const r = nodeRadius(found);
-    const dx = found.x - wx, dy = found.y - wy;
-    return (dx * dx + dy * dy) <= (r + 4) * (r + 4) ? found : null;
   }
 
   function isDimmed(node) {
@@ -111,95 +177,173 @@
 
   function draw() {
     if (!ctx) return;
+    const k = transform.k;
     ctx.save();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
     ctx.translate(transform.x, transform.y);
-    ctx.scale(transform.k, transform.k);
+    ctx.scale(k, k);
 
     const hov = store.state.hoveredNode;
     const sel = store.state.selectedNode;
     const focus = sel || hov;
 
-    // Edges first.
+    // Phase B2: Bezier edges with arrows
     for (const e of edges) {
       const s = e.source, t = e.target;
       if (!s || !t || typeof s.x !== "number") continue;
-      let state = "default";
-      if (focus && (s.id === focus.id || t.id === focus.id)) {
-        state = "active";
-      } else if (focus) {
-        state = "dimmed";
-      }
-      const w = e.weight || 1;
-      const lw = (0.5 + Math.min(w * 0.35, 2.5)) / transform.k;
-      ctx.globalAlpha = state === "dimmed" ? 0.04 : state === "active" ? 0.7 : 0.18;
+
+      const edgeType = e.type || "imports";
+      const color = edgeType === "circular"
+        ? EDGE_COLORS.circular
+        : edgeType === "function_call"
+          ? EDGE_COLORS.function_call
+          : EDGE_COLORS.imports;
+
+      let alpha = 0.18;
+      if (focus && (s.id === focus.id || t.id === focus.id)) alpha = 0.7;
+      else if (focus) alpha = 0.04;
+      ctx.globalAlpha = alpha;
+
+      const dx = t.x - s.x;
+      const dy = t.y - s.y;
+      const cx1 = s.x + dx * 0.4;
+      const cy1 = s.y;
+      const cx2 = s.x + dx * 0.6;
+      const cy2 = t.y;
+
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
-      ctx.lineTo(t.x, t.y);
-      ctx.strokeStyle = state === "active" ? EDGE_ACTIVE : EDGE_DEFAULT;
-      ctx.lineWidth = lw;
+      ctx.bezierCurveTo(cx1, cy1, cx2, cy2, t.x, t.y);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = ((e.weight || 1) * 1.5) / k;
+
+      if (edgeType === "circular") {
+        ctx.setLineDash([6 / k, 3 / k]);
+      }
       ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Arrow at target border
+      if (alpha >= 0.18) {
+        const tw = nodeWidth(t), th = nodeHeight(t, k);
+        const arrowPt = rectBorderIntersection(t.x, t.y, tw, th, dx, dy);
+        drawArrow(arrowPt.x, arrowPt.y, dx, dy, color, k);
+      }
+
+      // Circular warning label
+      if (edgeType === "circular" && alpha >= 0.18) {
+        const midX = (s.x + t.x) / 2;
+        const midY = (s.y + t.y) / 2 - 10 / k;
+        ctx.fillStyle = EDGE_COLORS.circular;
+        ctx.font = (500) + " " + (10 / k) + "px Sora, sans-serif";
+        ctx.fillText("⚠ circular", midX, midY);
+      }
     }
     ctx.globalAlpha = 1;
+    // Phase B1: Rectangle nodes
+    // B6: openDirs visibility filter
+    const _openDirs = store.state.openDirs;
+    const _dirFilter = _openDirs && _openDirs.size > 0;
 
-    // Nodes.
     for (const n of nodes) {
-      const r = nodeRadius(n);
+      // B6: skip node if dir filter active and node not in openDirs
+      if (_dirFilter) {
+        const parts = n.id.split("/");
+        let visible = false;
+        for (let i = 1; i <= parts.length; i++) {
+          if (_openDirs.has(parts.slice(0, i).join("/"))) { visible = true; break; }
+        }
+        if (!visible) continue;
+      }
+      const w = nodeWidth(n);
+      const h = nodeHeight(n, k);
+      const x = n.x - w / 2;
+      const y = n.y - h / 2;
+      const r = 6;
       const risk = nodeRisk(n);
       const ring = RING[risk] || RING.clean;
       const rw = RING_WIDTH[risk] || 1.5;
       const unsupported = n.supported === false;
-      let opacity = 0.65;
       const dim = isDimmed(n);
+
+      let opacity = 0.65;
       if (dim) opacity = 0.1;
       else if (unsupported) opacity = 0.5;
       else if (focus && n === focus) opacity = 1.0;
       else if (focus) opacity = 0.85;
       ctx.globalAlpha = opacity;
 
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      // Background fill
       ctx.fillStyle = unsupported ? NODE_FILL_UNSUPPORTED : NODE_FILL;
+      roundRect(ctx, x, y, w, h, r);
       ctx.fill();
 
-      // ponytail: unsupported → dashed border, no risk ring.
-      if (unsupported) {
-        ctx.setLineDash([4, 3]);
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
-        ctx.strokeStyle = "oklch(50% 0.005 75)";
-        ctx.lineWidth = 1.5 / transform.k;
-        ctx.stroke();
-        ctx.setLineDash([]);
-        continue;
-      }
-
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      // Border
       ctx.strokeStyle = ring;
-      ctx.lineWidth = rw / transform.k;
+      ctx.lineWidth = rw / k;
+      if (unsupported) {
+        // B4: Ghost node — dashed border
+        ctx.setLineDash([4 / k, 4 / k]);
+      }
+      roundRect(ctx, x, y, w, h, r);
       ctx.stroke();
+      ctx.setLineDash([]);
 
-      // Glow merah.
-      if (risk === "red" && !dim) {
-        ctx.shadowColor = RING.red;
-        ctx.shadowBlur = 12 / transform.k;
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
-        ctx.strokeStyle = ring;
-        ctx.lineWidth = rw / transform.k;
+      // Selected glow
+      if (sel && n === sel && !dim) {
+        ctx.shadowColor = ring;
+        ctx.shadowBlur = 8 / k;
+        roundRect(ctx, x, y, w, h, r);
         ctx.stroke();
         ctx.shadowBlur = 0;
       }
 
-      // Selected outer ring.
-      if (sel && n === sel) {
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, r + 5, 0, Math.PI * 2);
-        ctx.strokeStyle = "oklch(94% 0.006 75 / 0.4)";
-        ctx.lineWidth = 1 / transform.k;
+      // Red glow for high risk
+      if (risk === "red" && !dim && sel !== n) {
+        ctx.shadowColor = RING.red;
+        ctx.shadowBlur = 12 / k;
+        roundRect(ctx, x, y, w, h, r);
+        ctx.strokeStyle = ring;
+        ctx.lineWidth = rw / k;
         ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
+
+      // Filename header
+      ctx.fillStyle = INK_PRIMARY;
+      ctx.font = "600 " + (12 / k) + "px Sora, sans-serif";
+      const fname = n.id.split("/").pop() || n.id;
+      ctx.fillText(fname, x + NODE_PADDING, y + 16 / k);
+
+      // Details when zoomed in
+      if (k >= 0.5) {
+        // Divider
+        ctx.strokeStyle = BG_BORDER;
+        ctx.lineWidth = 1 / k;
+        ctx.beginPath();
+        ctx.moveTo(x, y + NODE_HEIGHT_BASE - 8);
+        ctx.lineTo(x + w, y + NODE_HEIGHT_BASE - 8);
+        ctx.stroke();
+
+        // Function list (max 5)
+        const fns = (n.functions || []).slice(0, 5);
+        ctx.fillStyle = INK_SECONDARY;
+        ctx.font = "400 " + (10 / k) + "px JetBrains Mono, monospace";
+        fns.forEach((fn, i) => {
+          ctx.fillText("ƒ " + fn.name, x + NODE_PADDING, y + NODE_HEIGHT_BASE + i * NODE_LINE_HEIGHT);
+        });
+        if ((n.functions || []).length > 5) {
+          ctx.fillStyle = INK_MUTED;
+          ctx.fillText("+" + ((n.functions || []).length - 5) + " more", x + NODE_PADDING, y + NODE_HEIGHT_BASE + 5 * NODE_LINE_HEIGHT);
+        }
+
+        // Import count
+        const importCount = (n.imports || []).length;
+        if (importCount > 0) {
+          ctx.fillStyle = INK_MUTED;
+          ctx.fillText("↳ " + importCount + " import" + (importCount > 1 ? "s" : ""), x + NODE_PADDING, y + h - 6);
+        }
       }
     }
     ctx.globalAlpha = 1;
@@ -232,7 +376,10 @@
       .force("link", d3.forceLink(edges).id((d) => d.id).distance(80).strength(0.4))
       .force("charge", d3.forceManyBody().strength(-300))
       .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collide", d3.forceCollide().radius((d) => nodeRadius(d) + 4))
+      .force("collide", d3.forceCollide().radius((d) => {
+        const w = nodeWidth(d), h = nodeHeight(d, 1);
+        return Math.sqrt(w * w + h * h) / 2 + 4;
+      }))
       .on("tick", tick);
   }
 
@@ -309,6 +456,46 @@
   function hideTooltip() {
     const tip = document.getElementById("tooltip");
     if (tip) tip.style.display = "none";
+  }
+
+  // B5: Edge hit detection — brute-force O(edges), ok for <500 edges
+  function edgeAt(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const sx = clientX - rect.left;
+    const sy = clientY - rect.top;
+    const wx = (sx - transform.x) / transform.k;
+    const wy = (sy - transform.y) / transform.k;
+    const threshold = 8 / transform.k;
+    for (const e of edges) {
+      const s = e.source, t = e.target;
+      if (!s || !t || typeof s.x !== "number") continue;
+      // Point-to-bezier approximation: sample 10 points
+      const dx = t.x - s.x, dy = t.y - s.y;
+      const cx1 = s.x + dx * 0.4, cy1 = s.y;
+      const cx2 = s.x + dx * 0.6, cy2 = t.y;
+      for (let i = 0; i <= 10; i++) {
+        const ti = i / 10;
+        const u = 1 - ti;
+        const px = u*u*u * s.x + 3*u*u*ti * cx1 + 3*u*ti*ti * cx2 + ti*ti*ti * t.x;
+        const py = u*u*u * s.y + 3*u*u*ti * cy1 + 3*u*ti*ti * cy2 + ti*ti*ti * t.y;
+        const dist = Math.sqrt((wx - px) ** 2 + (wy - py) ** 2);
+        if (dist < threshold) return e;
+      }
+    }
+    return null;
+  }
+
+  function showEdgeTooltip(edge, ev) {
+    const tip = document.getElementById("tooltip");
+    if (!tip || !edge) return;
+    const type = edge.type || "imports";
+    const label = type === "circular" ? "circular dependency"
+      : type === "function_call" ? "function call"
+      : "import";
+    tip.innerHTML = '<div class="tooltip-filename">' + escapeHtml(label) + '</div>';
+    tip.style.display = "block";
+    tip.style.left = (ev.clientX + 14) + "px";
+    tip.style.top = (ev.clientY + 14) + "px";
   }
 
   function basename(p) {
@@ -434,14 +621,26 @@
   function setupInteractions() {
     canvas.addEventListener("mousemove", (ev) => {
       const n = nodeAt(ev.clientX, ev.clientY);
-      if (n !== store.state.hoveredNode) {
-        setState({ hoveredNode: n });
-        if (n) showTooltip(n, ev);
-        else hideTooltip();
-      } else if (n) {
+      if (n) {
+        // B5: edge tooltip only when no node under cursor
+        if (n !== store.state.hoveredNode) {
+          setState({ hoveredNode: n });
+        }
         showTooltip(n, ev);
+        canvas.style.cursor = n.supported !== false ? "pointer" : "default";
+      } else {
+        // Check edge hover
+        const edge = edgeAt(ev.clientX, ev.clientY);
+        if (edge) {
+          if (store.state.hoveredNode) setState({ hoveredNode: null });
+          showEdgeTooltip(edge, ev);
+          canvas.style.cursor = "default";
+        } else {
+          if (store.state.hoveredNode) setState({ hoveredNode: null });
+          hideTooltip();
+          canvas.style.cursor = "grab";
+        }
       }
-      canvas.style.cursor = n ? "pointer" : "grab";
     });
 
     canvas.addEventListener("mouseleave", () => {
@@ -455,7 +654,6 @@
     });
 
     document.addEventListener("keydown", (ev) => {
-      // Skip kalau focus di input/textarea.
       const tag = (ev.target.tagName || "").toLowerCase();
       if (tag === "input" || tag === "textarea") return;
       if (ev.key === "Escape") {
@@ -472,14 +670,17 @@
       }
     });
 
-    // Repaint saat state berubah (filter / selection / hover).
     store.addEventListener("change", (e) => {
       if (e.detail.keys.includes("filter") || e.detail.keys.includes("selectedNode") || e.detail.keys.includes("hoveredNode")) {
         draw();
       }
     });
 
-    // Pan-to event dari panel.js (caller/callee click).
+    // B6: openDirs filter — listen graps:dirs-changed from sidebar.js
+    window.addEventListener("graps:dirs-changed", () => {
+      draw();
+    });
+
     window.addEventListener("graps:pan-to", (ev) => {
       const node = nodes.find((n) => n.id === ev.detail.id || n.path === ev.detail.id);
       if (node) {
@@ -488,7 +689,6 @@
       }
     });
 
-    // Warning banner toggle.
     const toggle = document.getElementById("warning-toggle");
     const banner = document.getElementById("warning-banner");
     if (toggle && banner) {
