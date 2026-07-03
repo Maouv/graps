@@ -43,9 +43,17 @@
     </div>
   </div>
 
-  <!-- MAIN AREA ----------------------------------------------- -->
-  <main class="main-area">
-    <div id="canvas-wrap" class="canvas-wrap">
+  <!-- MAIN LAYOUT ----------------------------------------------- -->
+  <div id="app-layout">
+
+    <!-- Sidebar kiri: directory tree -->
+    <aside id="dir-sidebar" class="dir-sidebar" role="navigation"
+      aria-label="Directory tree">
+      <!-- Diisi oleh sidebar.js -->
+    </aside>
+
+    <!-- Graph canvas: center -->
+    <div id="graph-wrap" class="graph-wrap">
       <canvas id="graph-canvas"
         role="img"
         aria-label="Dependency graph"
@@ -53,6 +61,9 @@
 
       <!-- Tooltip (positioned by JS) -->
       <div id="tooltip" class="tooltip" role="status" aria-live="polite"></div>
+
+      <!-- Node popover (positioned by panel.js, absolute over canvas) -->
+      <div id="node-popover" class="node-popover hidden"></div>
 
       <!-- Zoom indicator (bottom-right) -->
       <div class="zoom-indicator">
@@ -70,28 +81,25 @@
       </div>
     </div>
 
+    <!-- Side panel: kanan desktop, bottom sheet mobile -->
     <aside id="side-panel" class="side-panel" role="complementary"
       aria-label="File detail" aria-hidden="true">
-      <!-- ponytail: panel.js render ke #panel-scroll (innerHTML reset per selection).
-           Chat section sibling — tidak di-overwrite, di-wire sekali saat boot. -->
-      <div id="panel-scroll" class="panel-scroll"></div>
-      <section id="chat-section" class="chat-section" aria-label="AI chat">
-        <div class="chat-header">
-          <span class="chat-header-title">✦ Ask AI</span>
-          <button id="chat-collapse" class="chat-collapse" type="button"
-            aria-label="Collapse chat" aria-expanded="true">▾</button>
-        </div>
-        <div id="chat-messages" class="chat-messages"></div>
-        <div id="chat-warnings" class="chat-warnings"></div>
-        <div class="chat-input-bar">
-          <input id="chat-input" class="chat-input" type="text"
-            placeholder="Ask AI…  @file @function" autocomplete="off"
-            aria-label="Ask AI" />
-          <button id="chat-send" class="chat-send" type="button" aria-label="Send">↑</button>
-        </div>
-      </section>
+      <!-- Diisi oleh panel.js -->
     </aside>
-  </main>
+
+  </div>
+
+  <!-- AI chat bar: persistent bottom -->
+  <div id="ai-bar" class="ai-bar">
+    <div id="ai-messages" class="ai-messages"></div>
+    <div id="ai-input-row" class="ai-input-row">
+      <div id="ai-tags" class="ai-tags"></div>
+      <input id="ai-input" class="ai-input" type="text"
+        placeholder="Tanya tentang node ini..."
+        autocomplete="off" aria-label="AI chat" />
+      <button id="ai-send" class="ai-send" type="button" aria-label="Send">↑</button>
+    </div>
+  </div>
 
   <!-- SEARCH OVERLAY (Cmd+K) ---------------------------------- -->
   <div id="search-overlay" class="search-overlay" role="dialog"
@@ -112,6 +120,8 @@
   <script src="filter.js"></script>
   <script src="graph.js"></script>
   <script src="panel.js"></script>
+  <script src="sidebar.js"></script>
+  <script src="ai.js"></script>
   <script src="search.js"></script>
 </body>
 </html>

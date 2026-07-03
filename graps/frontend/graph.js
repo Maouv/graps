@@ -501,7 +501,7 @@
   }
 
   function boot() {
-    wrap = document.getElementById("canvas-wrap");
+    wrap = document.getElementById("graph-wrap");
     canvas = document.getElementById("graph-canvas");
     if (!canvas || !wrap) return;
     ctx = canvas.getContext("2d");

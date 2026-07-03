@@ -19,6 +19,10 @@
     selectedNode: null, // node object (bukan id)
     hoveredNode: null,
     filter: { risk: null, dead: false }, // risk: null|'high'
+    sidePanel: false,   // bool — apakah side panel terbuka
+    openDirs: new Set(), // Set<string> — directory yang di-expand user
+    aiHistory: [],       // array — conversation history session ini
+    activePanel: null,   // null|'sidebar'|'sidepanel'|'ai' — mobile: panel terbuka
   };
 
   function setState(partial) {
