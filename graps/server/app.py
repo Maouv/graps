@@ -185,6 +185,47 @@ def _extract_function_body(source: str, line_start: int | None, line_end: int | 
     return "\n".join(src_lines[start:end])
 
 
+# Map file suffix → Prism.js language id (PHASE5 §10 / F2). ponytail: only the
+# languages Prism loads via CDN in index.html — unknown → "none" (plain text).
+_LANGUAGE_FOR_SUFFIX: dict[str, str] = {
+    ".py": "python",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".go": "go",
+    ".rs": "rust",
+    ".rb": "ruby",
+    ".java": "java",
+    ".kt": "kotlin",
+    ".c": "c",
+    ".h": "c",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".hpp": "cpp",
+    ".cs": "csharp",
+    ".php": "php",
+    ".sh": "bash",
+    ".bash": "bash",
+    ".zsh": "bash",
+    ".sql": "sql",
+    ".json": "json",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".toml": "toml",
+    ".html": "markup",
+    ".xml": "markup",
+    ".md": "markdown",
+}
+
+
+def _language_for_suffix(suffix: str) -> str:
+    """Prism language id untuk ``suffix`` (mis. ``".py"`` → ``"python"``)."""
+    return _LANGUAGE_FOR_SUFFIX.get(suffix.lower(), "none")
+
+
 def build_ai_context(
     tagged: list[str],
     graph: dict[str, Any],
@@ -399,6 +440,67 @@ def create_app(
 
         return {"enabled": True, "reply": reply, "warnings": warnings}
 
+    @app.get("/api/source")
+    def get_source(file: str, fn: str | None = None) -> Any:
+        """Source code untuk file (atau satu function) — Phase 5 §10 (F1).
+
+        Query params:
+          ``file``: relative path dari scan_root (e.g. ``"services/user.py"``).
+          ``fn``  : nama function (optional). Kalau ada, return hanya function
+                    body via :func:`_extract_function_body` (line_start/line_end
+                    dari graph metadata — bukan ``ast``, plan.md: jangan duplikat).
+                    Kalau tidak ada, return seluruh file.
+
+        Security:
+          Path traversal guard — ``file`` di-resolve lalu ``relative_to``
+          scan_root. Escape (``../``) → 400. Tidak ada absolute path
+          di-expose (M-03).
+        """
+        if scan_root is None:
+            return JSONResponse({"error": "scan_root not set"}, status_code=500)
+
+        # Path traversal guard: file harus tetap di dalam scan_root setelah resolve.
+        try:
+            target = (scan_root / file).resolve()
+            target.relative_to(scan_root.resolve())
+        except (ValueError, OSError):
+            return JSONResponse({"error": "Invalid path"}, status_code=400)
+
+        if not target.exists() or not target.is_file():
+            return JSONResponse({"error": "File not found"}, status_code=404)
+
+        try:
+            raw = target.read_text(errors="replace")
+        except OSError as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+        language = _language_for_suffix(target.suffix)
+
+        if fn:
+            # Lookup function line_start/line_end dari graph metadata, lalu
+            # reuse _extract_function_body (plan.md: jangan duplikat).
+            node = next(
+                (n for n in (graph_data.get("nodes") or [])
+                 if isinstance(n, dict) and n.get("id") == file),
+                None,
+            )
+            fn_meta = None
+            if node is not None:
+                fn_meta = next(
+                    (f for f in (node.get("functions") or []) if f.get("name") == fn),
+                    None,
+                )
+            if fn_meta is None:
+                return JSONResponse(
+                    {"error": f"Function '{fn}' not found"}, status_code=404
+                )
+            body = _extract_function_body(
+                raw, fn_meta.get("line_start"), fn_meta.get("line_end")
+            )
+            return {"file": file, "fn": fn, "source": body, "language": language}
+
+        return {"file": file, "fn": None, "source": raw, "language": language}
+
     # Static mount HARUS terakhir — kalau di-mount sebelum route, "/" akan
     # menelan request dan API ter-shadow. Skip dengan warning kalau frontend
     # belum ada (mis. saat test atau saat dev install tanpa frontend bundle).
@@ -450,6 +552,30 @@ if __name__ == "__main__":
             r = client.get("/api/graph", headers={"host": HOST_OK})
             assert r.status_code == 200, r.status_code
             assert r.json() == graph, r.json()
+
+            # 1b–1e. GET /api/source (Phase 5 §10 / F1) — path traversal + fn lookup.
+            # 1b. valid file (no fn) → full source + language.
+            r = client.get("/api/source", params={"file": "a.py"}, headers={"host": HOST_OK})
+            assert r.status_code == 200, r.status_code
+            j = r.json()
+            assert j["file"] == "a.py" and j["fn"] is None, j
+            assert "def foo" in j["source"], j
+            assert j["language"] == "python", j
+            # 1c. valid file + valid fn → function body via _extract_function_body.
+            r = client.get("/api/source", params={"file": "a.py", "fn": "foo"}, headers={"host": HOST_OK})
+            assert r.status_code == 200, r.status_code
+            j = r.json()
+            assert j["fn"] == "foo" and "return 42" in j["source"], j
+            # 1d. path traversal (..) → 400.
+            r = client.get("/api/source", params={"file": "../a.py"}, headers={"host": HOST_OK})
+            assert r.status_code == 400, r.status_code
+            assert r.json() == {"error": "Invalid path"}, r.json()
+            # 1e. fn not found in graph metadata → 404.
+            r = client.get("/api/source", params={"file": "a.py", "fn": "nope"}, headers={"host": HOST_OK})
+            assert r.status_code == 404, r.status_code
+            # 1f. missing file on disk → 404.
+            r = client.get("/api/source", params={"file": "missing.py"}, headers={"host": HOST_OK})
+            assert r.status_code == 404, r.status_code
 
             # 2. /api/ai/summary deprecated response.
             body = {"file": "a.py", "function": "foo", "line": 1,

@@ -13,6 +13,18 @@
 
   <link rel="stylesheet" href="style.css" />
 
+  <!-- Prism.js (Phase 5 §10 / F2) — source code highlight via CDN, no build step.
+       CSS theme + core + language components. ponytail: load sebelum app scripts
+       supaya window.Prism ready saat panel.js memanggil highlightElement. -->
+  <link rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-go.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-rust.min.js"></script>
+
   <!-- D3 v7 — pakai d3-force, d3-zoom, d3-quadtree dari bundle ini. -->
   <script src="https://d3js.org/d3.v7.min.js"></script>
 </head>

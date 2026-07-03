@@ -262,13 +262,33 @@
     );
   }
 
-  // ponytail: loadSourceCode placeholder — real fetch arrives in Phase F (Prism.js)
-  function loadSourceCode(fileId, fnName) {
+  // F2: loadSourceCode — fetch /api/source, render <code>, Prism.highlightElement.
+  // ponytail: guard Prism undefined (CDN block / offline) → plain text fallback.
+  async function loadSourceCode(fileId, fnName) {
     var viewer = document.getElementById("source-viewer");
     var codeEl = document.getElementById("source-code");
     if (!viewer || !codeEl) return;
     viewer.classList.remove("hidden");
-    codeEl.textContent = "# Source code akan di-load via /api/source (Phase F)\n# File: " + fileId + "\n# Function: " + fnName;
+    codeEl.textContent = "Loading…";
+    try {
+      var url = "/api/source?file=" + encodeURIComponent(fileId) +
+                "&fn=" + encodeURIComponent(fnName);
+      var res = await fetch(url);
+      var data = await res.json();
+      if (data.error) {
+        codeEl.className = "language-none";
+        codeEl.textContent = "Error: " + data.error;
+        return;
+      }
+      codeEl.textContent = data.source || "";
+      codeEl.className = "language-" + (data.language || "none");
+      if (window.Prism && Prism.highlightElement) {
+        Prism.highlightElement(codeEl);
+      }
+    } catch (err) {
+      codeEl.className = "language-none";
+      codeEl.textContent = "Gagal load source code";
+    }
   }
 
   function render() {
