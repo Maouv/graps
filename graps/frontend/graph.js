@@ -1,13 +1,14 @@
-/* graps — Canvas2D graph renderer + D3 force simulation.
+/* graps — Canvas2D graph renderer.
  *
  * Public API: window.graps.graph
- *   .panTo(node)  — center viewport ke node (pakai zoom transform)
+ *   .panTo(node)  — center viewport ke node
  *   .fit()        — fit-to-viewport
  *
- * ponytail: rebuild quadtree tiap tick (O(n)). Cukup untuk <500 nodes;
- * 2000+ butuh throttle atau static index. Upgrade kalau frame drop terasa.
- * ponytail: source code raw belum di-fetch (parser belum ekstrak) — AI
- * dipanggil dengan source="".
+ * CHANGES v2:
+ *   - Layout: D3 force → tree layout (LR, hirarki berdasarkan import depth)
+ *   - Zoom: fix pinch-to-zoom di mobile (touch events manual)
+ *   - Visual: card-style node (header / imports / functions / label section)
+ *   - Semua state, API, interactions, backend, events TIDAK BERUBAH
  */
 (function () {
   "use strict";
@@ -19,63 +20,73 @@
   let canvas, ctx, wrap;
   let width = 0, height = 0, dpr = 1;
   let nodes = [], edges = [];
-  let simulation = null;
+  let simulation = null;  // kept for API compat, null in tree mode
   let quadtree = null;
   let transform = { x: 0, y: 0, k: 1 };
   let zoomBehavior = null;
 
-  // Risk → ring color (sinkron dengan CSS tokens, hardcoded karena ctx tidak
-  // bisa baca CSS custom prop dengan murah; ponytail: copy dari ui-ux §1.1).
+  // ── DESIGN TOKENS ────────────────────────────────────────────────────────
   const RING = {
     clean:  "oklch(52% 0.02 250)",
     yellow: "oklch(76% 0.15 75)",
     red:    "oklch(58% 0.22 25)",
   };
   const RING_WIDTH = { clean: 1.5, yellow: 2, red: 2.5 };
-  const NODE_FILL = "oklch(18% 0.008 75)";
-  const NODE_FILL_UNSUPPORTED = "oklch(35% 0.005 75)";
-  const EDGE_DEFAULT = "oklch(65% 0.008 75)";
-  const EDGE_ACTIVE = "oklch(94% 0.006 75)";
 
-  // Phase B: edge colors
+  const NODE_BG            = "oklch(18% 0.008 75)";
+  const NODE_BG_UNSUPPORT  = "oklch(14% 0.005 75)";
+  const NODE_HEADER_BG     = "oklch(22% 0.010 75)";
+  const NODE_HEADER_BG_DIR = "oklch(20% 0.04 250)";
+  const NODE_SECTION_DIV   = "oklch(26% 0.008 75)";
+  const NODE_BORDER        = "oklch(30% 0.012 75)";
+
+  const INK_PRIMARY   = "oklch(94% 0.006 75)";
+  const INK_SECONDARY = "oklch(65% 0.008 75)";
+  const INK_MUTED     = "oklch(42% 0.006 75)";
+
+  const CONNECTOR_COLOR = "oklch(55% 0.12 250)";
+
   const EDGE_COLORS = {
-    imports:       "oklch(52% 0.15 145)",   // hijau
-    circular:      "oklch(58% 0.22 25)",    // merah
-    function_call: "oklch(55% 0.18 280)",   // biru/ungu
+    imports:       "oklch(52% 0.15 145)",
+    circular:      "oklch(58% 0.22 25)",
+    function_call: "oklch(55% 0.18 280)",
   };
 
-  // Phase B: rectangle node sizing
-  const NODE_MIN_WIDTH = 140;
-  const NODE_HEIGHT_BASE = 44;
-  const NODE_LINE_HEIGHT = 18;
-  const NODE_PADDING = 10;
-  const BG_BORDER = "oklch(24% 0.008 75)";
-  const INK_PRIMARY = "oklch(94% 0.006 75)";
-  const INK_SECONDARY = "oklch(65% 0.008 75)";
-  const INK_MUTED = "oklch(42% 0.006 75)";
+  // ── NODE SIZING ───────────────────────────────────────────────────────────
+  const NODE_W          = 210;
+  const NODE_HEADER_H   = 34;
+  const NODE_SECTION_PAD= 8;
+  const NODE_LABEL_H    = 13;
+  const NODE_CONTENT_H  = 15;
+  const NODE_FN_MAX     = 4;
+  const NODE_SECTION_GAP= 1;
+  const NODE_RADIUS     = 8;
+  const NODE_PADDING_X  = 12;
+  const CONNECTOR_R     = 4;
 
-  function nodeRisk(n) {
-    return n.risk_level || "clean";
-  }
+  // Tree layout spacing
+  const TREE_COL_GAP    = 80;   // horizontal gap between columns
+  const TREE_ROW_GAP    = 28;   // vertical gap between cards in same column
 
-  function nodeWidth(n) {
-    const textWidth = ctx ? ctx.measureText(n.id.split('/').pop()).width : 100;
-    return Math.max(NODE_MIN_WIDTH, textWidth + NODE_PADDING * 2);
-  }
+  function nodeWidth() { return NODE_W; }
 
   function nodeHeight(n, zoomK) {
-    // Tier sinkron dengan LOD drawNode: k < 0.7 → box pendek (header only),
-    // k ≥ 0.7 → box tinggi (header + function list).
-    if (zoomK < 0.7) return NODE_HEIGHT_BASE;
-    const fns = (n.functions || []).slice(0, 5);
-    return NODE_HEIGHT_BASE + fns.length * NODE_LINE_HEIGHT + 8;
+    const k = zoomK || 1;
+    if (k < 0.45) return NODE_HEADER_H + 8;
+    if (k < 0.75) {
+      return NODE_HEADER_H + NODE_SECTION_GAP +
+             NODE_SECTION_PAD * 2 + NODE_LABEL_H + NODE_CONTENT_H;
+    }
+    const fnCount = Math.min((n.functions || []).length, NODE_FN_MAX);
+    const importSec = NODE_SECTION_PAD * 2 + NODE_LABEL_H + NODE_CONTENT_H;
+    const fnSec     = NODE_SECTION_PAD * 2 + NODE_LABEL_H + Math.max(1, fnCount) * NODE_CONTENT_H;
+    const labelSec  = NODE_SECTION_PAD * 2 + NODE_CONTENT_H;
+    return NODE_HEADER_H + NODE_SECTION_GAP + importSec +
+           NODE_SECTION_GAP + fnSec + NODE_SECTION_GAP + labelSec;
   }
 
-  // Text overflow ellipsis: potong text + "…" bila measureText > maxWidth.
-  // Wajib set ctx.font SEBELUM panggil (measureText pakai font aktif).
-  // ponytail: iterasi char O(n) per draw, <500 node → cukup. Upgrade ke binary
-  // search kalau nama panjang + frame drop terasa.
   function clipText(text, maxWidth) {
+    if (!text) return "";
     if (ctx.measureText(text).width <= maxWidth) return text;
     const ell = "…";
     if (ctx.measureText(ell).width >= maxWidth) return ell;
@@ -84,7 +95,93 @@
     return i > 0 ? text.slice(0, i) + ell : ell;
   }
 
-  // Phase B: rectangle hit detection
+  // ── TREE LAYOUT ───────────────────────────────────────────────────────────
+  // Assign x/y to each node based on import depth (topological BFS).
+  // Nodes with no incoming edges = column 0 (roots).
+  // Each edge source→target means target is at least col(source)+1.
+  function computeTreeLayout() {
+    if (!nodes.length) return;
+
+    const byId = new Map(nodes.map(n => [n.id, n]));
+
+    // Build adjacency from raw edge list (edges may still have string ids here)
+    const outEdges = new Map();  // id → [target_id, ...]
+    const inDegree = new Map();
+    nodes.forEach(n => { outEdges.set(n.id, []); inDegree.set(n.id, 0); });
+
+    edges.forEach(e => {
+      const sid = typeof e.source === "object" ? e.source.id : e.source;
+      const tid = typeof e.target === "object" ? e.target.id : e.target;
+      if (!byId.has(sid) || !byId.has(tid)) return;
+      outEdges.get(sid).push(tid);
+      inDegree.set(tid, (inDegree.get(tid) || 0) + 1);
+    });
+
+    // BFS from roots to assign column (depth)
+    const col = new Map();
+    const queue = [];
+    nodes.forEach(n => {
+      if ((inDegree.get(n.id) || 0) === 0) {
+        col.set(n.id, 0);
+        queue.push(n.id);
+      }
+    });
+
+    // Handle cycles / orphans: any unvisited gets col 0
+    if (queue.length === 0) {
+      nodes.forEach(n => { col.set(n.id, 0); queue.push(n.id); });
+    }
+
+    let qi = 0;
+    while (qi < queue.length) {
+      const id = queue[qi++];
+      const c = col.get(id) || 0;
+      (outEdges.get(id) || []).forEach(tid => {
+        if (!col.has(tid) || col.get(tid) < c + 1) {
+          col.set(tid, c + 1);
+          queue.push(tid);
+        }
+      });
+    }
+    // Stragglers (in cycles not reached)
+    nodes.forEach(n => { if (!col.has(n.id)) col.set(n.id, 0); });
+
+    // Group nodes by column
+    const cols = new Map();
+    nodes.forEach(n => {
+      const c = col.get(n.id) || 0;
+      if (!cols.has(c)) cols.set(c, []);
+      cols.get(c).push(n);
+    });
+
+    // Assign x per column, y per row within column
+    // x: based on column index, spaced by NODE_W + TREE_COL_GAP
+    // y: centered in viewport, spaced by nodeHeight + TREE_ROW_GAP
+    const sortedCols = [...cols.keys()].sort((a, b) => a - b);
+    let curX = NODE_W / 2 + 40;
+
+    sortedCols.forEach(ci => {
+      const colNodes = cols.get(ci);
+      // Sort nodes within col by id for stability
+      colNodes.sort((a, b) => a.id.localeCompare(b.id));
+
+      const colH = colNodes.reduce((acc, n) => {
+        return acc + nodeHeight(n, 1) + TREE_ROW_GAP;
+      }, -TREE_ROW_GAP);
+
+      let curY = -colH / 2;
+      colNodes.forEach(n => {
+        const h = nodeHeight(n, 1);
+        n.x = curX;
+        n.y = curY + h / 2;
+        curY += h + TREE_ROW_GAP;
+      });
+
+      curX += NODE_W + TREE_COL_GAP;
+    });
+  }
+
+  // ── HIT DETECTION ────────────────────────────────────────────────────────
   function nodeAt(clientX, clientY) {
     if (!quadtree) return null;
     const rect = canvas.getBoundingClientRect();
@@ -92,19 +189,16 @@
     const sy = clientY - rect.top;
     const wx = (sx - transform.x) / transform.k;
     const wy = (sy - transform.y) / transform.k;
-
-    const found = quadtree.find(wx, wy, 120);
+    const found = quadtree.find(wx, wy, 200);
     if (!found) return null;
-
     const w = nodeWidth(found);
     const h = nodeHeight(found, transform.k);
     const nx = found.x - w / 2;
     const ny = found.y - h / 2;
-
     return (wx >= nx && wx <= nx + w && wy >= ny && wy <= ny + h) ? found : null;
   }
 
-  // Phase B: rounded rectangle path helper
+  // ── DRAW HELPERS ──────────────────────────────────────────────────────────
   function roundRect(ctx, x, y, w, h, r) {
     ctx.beginPath();
     ctx.moveTo(x + r, y);
@@ -119,7 +213,30 @@
     ctx.closePath();
   }
 
-  // Phase B: bezier edge + arrow helpers
+  function roundRectTop(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h);
+    ctx.lineTo(x, y + h);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
+
+  function roundRectBottom(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + w, y);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y);
+    ctx.closePath();
+  }
+
   function rectBorderIntersection(cx, cy, w, h, dx, dy) {
     const hw = w / 2, hh = h / 2;
     const scale = Math.min(hw / Math.abs(dx || 1e-9), hh / Math.abs(dy || 1e-9));
@@ -128,44 +245,27 @@
 
   function drawArrow(tx, ty, dx, dy, color, k) {
     const angle = Math.atan2(dy, dx);
-    const size = 8 / k;
+    const size = 7 / k;
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.moveTo(tx, ty);
-    ctx.lineTo(
-      tx - size * Math.cos(angle - Math.PI / 6),
-      ty - size * Math.sin(angle - Math.PI / 6)
-    );
-    ctx.lineTo(
-      tx - size * Math.cos(angle + Math.PI / 6),
-      ty - size * Math.sin(angle + Math.PI / 6)
-    );
+    ctx.lineTo(tx - size * Math.cos(angle - Math.PI / 6), ty - size * Math.sin(angle - Math.PI / 6));
+    ctx.lineTo(tx - size * Math.cos(angle + Math.PI / 6), ty - size * Math.sin(angle + Math.PI / 6));
     ctx.closePath();
     ctx.fill();
   }
 
-  function resize() {
-    if (!wrap) return;
-    const rect = wrap.getBoundingClientRect();
-    width = Math.max(rect.width, 100);
-    height = Math.max(rect.height, 100);
-    dpr = window.devicePixelRatio || 1;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    canvas.style.width = width + "px";
-    canvas.style.height = height + "px";
-    if (simulation) {
-      simulation.force("center", d3.forceCenter(width / 2, height / 2));
-      simulation.alpha(0.3).restart();
-    }
+  function drawConnectorDots(x, y, w, h, k) {
+    const cy = y + h / 2;
+    ctx.fillStyle = CONNECTOR_COLOR;
+    ctx.strokeStyle = NODE_BG;
+    ctx.lineWidth = 1.5 / k;
+    ctx.beginPath(); ctx.arc(x, cy, CONNECTOR_R / k, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x + w, cy, CONNECTOR_R / k, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   }
 
-  function buildQuadtree() {
-    quadtree = d3.quadtree()
-      .x((d) => d.x)
-      .y((d) => d.y)
-      .addAll(nodes);
-  }
+  // ── NODE CARD RENDERER ────────────────────────────────────────────────────
+  function nodeRisk(n) { return n.risk_level || "clean"; }
 
   function isDimmed(node) {
     const f = store.state.filter;
@@ -173,15 +273,10 @@
     const sel = store.state.selectedNode;
     if (f.risk === "high" && nodeRisk(node) !== "red") return true;
     if (f.dead) {
-      // Dead = semua fungsi is_dead_code, atau tidak ada fungsi sama sekali
-      // tapi tetap connected. ponytail: simple — kalau ada minimal 1 fungsi
-      // non-dead → bukan dead.
       const fns = node.functions || [];
-      if (fns.length === 0) return false;  // zero-function files: neutral, show them (Finding 12)
-      const allDead = fns.every((fn) => fn.is_dead_code);
-      if (!allDead) return true;
+      if (fns.length === 0) return false;
+      if (!fns.every(fn => fn.is_dead_code)) return true;
     }
-    // Selected/hover: dim semua yang bukan node itu atau neighbor.
     const focus = sel || hov;
     if (focus && focus !== node) {
       const neigh = focus._neighbors;
@@ -190,6 +285,183 @@
     return false;
   }
 
+  function drawNode(n, focus, k) {
+    const w = nodeWidth(n);
+    const h = nodeHeight(n, k);
+    const x = n.x - w / 2;
+    const y = n.y - h / 2;
+    const risk       = nodeRisk(n);
+    const ring       = RING[risk] || RING.clean;
+    const rw         = RING_WIDTH[risk] || 1.5;
+    const unsupported = n.supported === false;
+    const isDir      = n.is_directory || n.type === "directory";
+    const selected   = focus && n === focus;
+    const dim        = isDimmed(n);
+
+    let opacity = 0.85;
+    if (dim)         opacity = 0.08;
+    else if (unsupported) opacity = 0.45;
+    else if (selected)    opacity = 1.0;
+    else if (focus)       opacity = 0.75;
+    ctx.globalAlpha = opacity;
+
+    // ── Card body
+    ctx.fillStyle = unsupported ? NODE_BG_UNSUPPORT : NODE_BG;
+    roundRect(ctx, x, y, w, h, NODE_RADIUS);
+    ctx.fill();
+
+    // ── Card border
+    const borderColor = risk !== "clean" ? ring : NODE_BORDER;
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = rw / k;
+    if (unsupported) ctx.setLineDash([4 / k, 4 / k]);
+    roundRect(ctx, x, y, w, h, NODE_RADIUS);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // ── Selected glow
+    if (selected && !dim) {
+      ctx.shadowColor = ring; ctx.shadowBlur = 10 / k;
+      roundRect(ctx, x, y, w, h, NODE_RADIUS); ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+    // ── Red glow
+    if (risk === "red" && !dim && !selected) {
+      ctx.shadowColor = RING.red; ctx.shadowBlur = 14 / k;
+      roundRect(ctx, x, y, w, h, NODE_RADIUS);
+      ctx.strokeStyle = ring; ctx.lineWidth = rw / k; ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+
+    // LOD: silhouette only
+    if (k < 0.45) { drawConnectorDots(x, y, w, h, k); return; }
+
+    // ── HEADER ────────────────────────────────────────────────────────────
+    ctx.fillStyle = isDir ? NODE_HEADER_BG_DIR : NODE_HEADER_BG;
+    roundRectTop(ctx, x, y, w, NODE_HEADER_H, NODE_RADIUS);
+    ctx.fill();
+
+    // Header divider
+    ctx.strokeStyle = NODE_SECTION_DIV;
+    ctx.lineWidth = 1 / k;
+    ctx.beginPath();
+    ctx.moveTo(x, y + NODE_HEADER_H);
+    ctx.lineTo(x + w, y + NODE_HEADER_H);
+    ctx.stroke();
+
+    // Icon dot
+    const iconX = x + NODE_PADDING_X + 5;
+    const iconY = y + NODE_HEADER_H / 2;
+    ctx.fillStyle = isDir ? "oklch(62% 0.14 250)" : INK_MUTED;
+    ctx.beginPath();
+    ctx.arc(iconX, iconY, 4 / k < 4 ? 4 : 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Filename
+    ctx.fillStyle = INK_PRIMARY;
+    ctx.font = "600 11px 'Sora', sans-serif";
+    const fname = n.id.split("/").pop() || n.id;
+    ctx.fillText(clipText(fname, w - NODE_PADDING_X * 2 - 16), iconX + 10, y + NODE_HEADER_H / 2 + 4);
+
+    // LOD: compact (header + import count)
+    if (k < 0.75) {
+      const secY = y + NODE_HEADER_H + NODE_SECTION_GAP + NODE_SECTION_PAD;
+      const importCount = (n.imports || []).length;
+      ctx.fillStyle = INK_MUTED;
+      ctx.font = "400 9px 'JetBrains Mono', monospace";
+      ctx.fillText(
+        clipText("↳ " + importCount + " import" + (importCount !== 1 ? "s" : ""), w - NODE_PADDING_X * 2),
+        x + NODE_PADDING_X, secY + NODE_LABEL_H
+      );
+      drawConnectorDots(x, y, w, h, k);
+      return;
+    }
+
+    // ── FULL CARD ─────────────────────────────────────────────────────────
+    let curY = y + NODE_HEADER_H + NODE_SECTION_GAP;
+
+    // — IMPORTS section —
+    const importSecH = NODE_SECTION_PAD * 2 + NODE_LABEL_H + NODE_CONTENT_H;
+    ctx.fillStyle = INK_MUTED;
+    ctx.font = "700 8px 'Sora', sans-serif";
+    ctx.fillText("IMPORTS", x + NODE_PADDING_X, curY + NODE_SECTION_PAD + NODE_LABEL_H - 1);
+
+    const imports = n.imports || [];
+    const importStr = imports.length > 0
+      ? imports.slice(0, 3).map(im =>
+          (typeof im === "string" ? im : (im.name || "?")).split("/").pop()
+        ).join(", ") + (imports.length > 3 ? " +" + (imports.length - 3) : "")
+      : "—";
+    ctx.fillStyle = INK_SECONDARY;
+    ctx.font = "400 9px 'JetBrains Mono', monospace";
+    ctx.fillText(
+      clipText(importStr, w - NODE_PADDING_X * 2),
+      x + NODE_PADDING_X,
+      curY + NODE_SECTION_PAD + NODE_LABEL_H + NODE_CONTENT_H
+    );
+
+    curY += importSecH + NODE_SECTION_GAP;
+    // divider
+    ctx.strokeStyle = NODE_SECTION_DIV; ctx.lineWidth = 1 / k;
+    ctx.beginPath(); ctx.moveTo(x, curY); ctx.lineTo(x + w, curY); ctx.stroke();
+
+    // — FUNCTIONS section —
+    const fns = (n.functions || []).slice(0, NODE_FN_MAX);
+    const fnSecH = NODE_SECTION_PAD * 2 + NODE_LABEL_H + Math.max(1, fns.length) * NODE_CONTENT_H;
+
+    ctx.fillStyle = INK_MUTED;
+    ctx.font = "700 8px 'Sora', sans-serif";
+    ctx.fillText("FUNCTIONS", x + NODE_PADDING_X, curY + NODE_SECTION_PAD + NODE_LABEL_H - 1);
+
+    if (fns.length === 0) {
+      ctx.fillStyle = INK_MUTED;
+      ctx.font = "400 9px 'JetBrains Mono', monospace";
+      ctx.fillText("—", x + NODE_PADDING_X, curY + NODE_SECTION_PAD + NODE_LABEL_H + NODE_CONTENT_H);
+    } else {
+      fns.forEach((fn, i) => {
+        const dead = fn.is_dead_code;
+        ctx.fillStyle = dead ? INK_MUTED : INK_PRIMARY;
+        ctx.font = (dead ? "italic 400" : "400") + " 9px 'JetBrains Mono', monospace";
+        ctx.fillText(
+          clipText((dead ? "ø " : "ƒ ") + fn.name, w - NODE_PADDING_X * 2),
+          x + NODE_PADDING_X,
+          curY + NODE_SECTION_PAD + NODE_LABEL_H + (i + 1) * NODE_CONTENT_H
+        );
+      });
+      if ((n.functions || []).length > NODE_FN_MAX) {
+        ctx.fillStyle = INK_MUTED;
+        ctx.font = "400 8px 'Sora', sans-serif";
+        ctx.fillText(
+          "+" + ((n.functions || []).length - NODE_FN_MAX) + " more",
+          x + NODE_PADDING_X,
+          curY + NODE_SECTION_PAD + NODE_LABEL_H + (NODE_FN_MAX + 1) * NODE_CONTENT_H
+        );
+      }
+    }
+
+    curY += fnSecH + NODE_SECTION_GAP;
+    // divider
+    ctx.strokeStyle = NODE_SECTION_DIV; ctx.lineWidth = 1 / k;
+    ctx.beginPath(); ctx.moveTo(x, curY); ctx.lineTo(x + w, curY); ctx.stroke();
+
+    // — LABEL / meta section —
+    const labelSecH = NODE_SECTION_PAD * 2 + NODE_CONTENT_H;
+    ctx.fillStyle = "oklch(16% 0.008 75)";
+    roundRectBottom(ctx, x, curY, w, labelSecH, NODE_RADIUS);
+    ctx.fill();
+
+    const riskText = n.risk_summary
+      ? clipText(n.risk_summary, w - NODE_PADDING_X * 2)
+      : (isDir ? "directory" : risk === "red" ? "high risk" : risk === "yellow" ? "warning" : "clean");
+    ctx.fillStyle = risk === "red" ? RING.red : risk === "yellow" ? RING.yellow : INK_MUTED;
+    ctx.font = "500 8px 'Sora', sans-serif";
+    ctx.fillText(riskText, x + NODE_PADDING_X, curY + NODE_SECTION_PAD + NODE_CONTENT_H - 1);
+
+    // Connector dots
+    drawConnectorDots(x, y, w, h, k);
+  }
+
+  // ── DRAW ──────────────────────────────────────────────────────────────────
   function draw() {
     if (!ctx) return;
     const k = transform.k;
@@ -203,7 +475,7 @@
     const sel = store.state.selectedNode;
     const focus = sel || hov;
 
-    // Phase B2: Bezier edges with arrows
+    // ── EDGES ─────────────────────────────────────────────────────────────
     for (const e of edges) {
       const s = e.source, t = e.target;
       if (!s || !t || typeof s.x !== "number") continue;
@@ -216,54 +488,53 @@
           : EDGE_COLORS.imports;
 
       let alpha = 0.18;
-      if (focus && (s.id === focus.id || t.id === focus.id)) alpha = 0.7;
+      if (focus && (s.id === focus.id || t.id === focus.id)) alpha = 0.80;
       else if (focus) alpha = 0.04;
       ctx.globalAlpha = alpha;
 
-      const dx = t.x - s.x;
-      const dy = t.y - s.y;
-      const cx1 = s.x + dx * 0.4;
-      const cy1 = s.y;
-      const cx2 = s.x + dx * 0.6;
-      const cy2 = t.y;
-
+      const dx = t.x - s.x, dy = t.y - s.y;
+      // Elbow connector: horizontal then vertical (tree style)
+      const midX = s.x + (t.x - s.x) * 0.5;
       ctx.beginPath();
-      ctx.moveTo(s.x, s.y);
-      ctx.bezierCurveTo(cx1, cy1, cx2, cy2, t.x, t.y);
+      ctx.moveTo(s.x + NODE_W / 2, s.y);          // from right edge of source
+      ctx.bezierCurveTo(
+        midX, s.y,
+        midX, t.y,
+        t.x - NODE_W / 2, t.y                      // to left edge of target
+      );
       ctx.strokeStyle = color;
-      ctx.lineWidth = ((e.weight || 1) * 1.5) / k;
+      ctx.lineWidth = 1.5 / k;
 
-      if (edgeType === "circular") {
-        ctx.setLineDash([6 / k, 3 / k]);
+      if (edgeType === "circular" || edgeType === "function_call") {
+        ctx.setLineDash([5 / k, 4 / k]);
+      } else {
+        ctx.setLineDash([]);
       }
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Arrow at target border
+      // Arrow at target left edge
       if (alpha >= 0.18) {
-        const tw = nodeWidth(t), th = nodeHeight(t, k);
-        const arrowPt = rectBorderIntersection(t.x, t.y, tw, th, dx, dy);
-        drawArrow(arrowPt.x, arrowPt.y, dx, dy, color, k);
+        const tx2 = t.x - NODE_W / 2;
+        const ty2 = t.y;
+        drawArrow(tx2, ty2, -1, 0, color, k);
       }
 
-      // Circular warning label — zoom-aware (font world-constant, skala ikut zoom).
-      // Sembunyi saat zoom out jauh (k < 0.3), konsisten dengan LOD node.
-      if (edgeType === "circular" && alpha >= 0.18 && k >= 0.3) {
-        const midX = (s.x + t.x) / 2;
-        const midY = (s.y + t.y) / 2 - 10;
+      // Circular warning label
+      if (edgeType === "circular" && alpha >= 0.18 && k >= 0.35) {
+        const midX2 = (s.x + t.x) / 2;
+        const midY2 = (s.y + t.y) / 2 - 10;
         ctx.fillStyle = EDGE_COLORS.circular;
         ctx.font = "500 10px Sora, sans-serif";
-        ctx.fillText("⚠ circular", midX, midY);
+        ctx.fillText("⚠ circular", midX2, midY2);
       }
     }
     ctx.globalAlpha = 1;
-    // Phase B1: Rectangle nodes
-    // B6: openDirs visibility filter
+
+    // ── NODES ─────────────────────────────────────────────────────────────
     const _openDirs = store.state.openDirs;
     const _dirFilter = _openDirs && _openDirs.size > 0;
-
     for (const n of nodes) {
-      // B6: skip node if dir filter active and node not in openDirs
       if (_dirFilter) {
         const parts = n.id.split("/");
         let visible = false;
@@ -272,151 +543,141 @@
         }
         if (!visible) continue;
       }
-      const w = nodeWidth(n);
-      const h = nodeHeight(n, k);
-      const x = n.x - w / 2;
-      const y = n.y - h / 2;
-      const r = 6;
-      const risk = nodeRisk(n);
-      const ring = RING[risk] || RING.clean;
-      const rw = RING_WIDTH[risk] || 1.5;
-      const unsupported = n.supported === false;
-      const dim = isDimmed(n);
-
-      let opacity = 0.65;
-      if (dim) opacity = 0.1;
-      else if (unsupported) opacity = 0.5;
-      else if (focus && n === focus) opacity = 1.0;
-      else if (focus) opacity = 0.85;
-      ctx.globalAlpha = opacity;
-
-      // Background fill
-      ctx.fillStyle = unsupported ? NODE_FILL_UNSUPPORTED : NODE_FILL;
-      roundRect(ctx, x, y, w, h, r);
-      ctx.fill();
-
-      // Border
-      ctx.strokeStyle = ring;
-      ctx.lineWidth = rw / k;
-      if (unsupported) {
-        // B4: Ghost node — dashed border
-        ctx.setLineDash([4 / k, 4 / k]);
-      }
-      roundRect(ctx, x, y, w, h, r);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Selected glow
-      if (sel && n === sel && !dim) {
-        ctx.shadowColor = ring;
-        ctx.shadowBlur = 8 / k;
-        roundRect(ctx, x, y, w, h, r);
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-      }
-
-      // Red glow for high risk
-      if (risk === "red" && !dim && sel !== n) {
-        ctx.shadowColor = RING.red;
-        ctx.shadowBlur = 12 / k;
-        roundRect(ctx, x, y, w, h, r);
-        ctx.strokeStyle = ring;
-        ctx.lineWidth = rw / k;
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-      }
-
-      // Level of detail (LOD), zoom-aware:
-      //   k < 0.3        → no text (warna node saja, orientasi via risk ring)
-      //   0.3 ≤ k < 0.7  → filename header only
-      //   k ≥ 0.7        → header + function list + import count
-      // Font world-constant (bukan /k) → teks skala seragam ikut zoom, konsisten
-      // dengan nodeWidth/nodeHeight yang juga world-space. Fix root cause bug
-      // "teks ga responsif & keluar node".
-      if (k >= 0.3) {
-        // Filename header
-        ctx.fillStyle = INK_PRIMARY;
-        ctx.font = "600 12px Sora, sans-serif";
-        const fname = n.id.split("/").pop() || n.id;
-        ctx.fillText(clipText(fname, w - NODE_PADDING * 2), x + NODE_PADDING, y + 16);
-
-        if (k >= 0.7) {
-          // Divider
-          ctx.strokeStyle = BG_BORDER;
-          ctx.lineWidth = 1 / k;
-          ctx.beginPath();
-          ctx.moveTo(x, y + NODE_HEIGHT_BASE - 8);
-          ctx.lineTo(x + w, y + NODE_HEIGHT_BASE - 8);
-          ctx.stroke();
-
-          // Function list (max 5) — ellipsis bila nama panjang keluar node
-          const fns = (n.functions || []).slice(0, 5);
-          ctx.fillStyle = INK_SECONDARY;
-          ctx.font = "400 10px JetBrains Mono, monospace";
-          const fnMax = w - NODE_PADDING * 2;
-          fns.forEach((fn, i) => {
-            ctx.fillText(clipText("ƒ " + fn.name, fnMax), x + NODE_PADDING, y + NODE_HEIGHT_BASE + i * NODE_LINE_HEIGHT);
-          });
-          if ((n.functions || []).length > 5) {
-            ctx.fillStyle = INK_MUTED;
-            ctx.fillText("+" + ((n.functions || []).length - 5) + " more", x + NODE_PADDING, y + NODE_HEIGHT_BASE + 5 * NODE_LINE_HEIGHT);
-          }
-
-          // Import count
-          const importCount = (n.imports || []).length;
-          if (importCount > 0) {
-            ctx.fillStyle = INK_MUTED;
-            ctx.fillText(clipText("↳ " + importCount + " import" + (importCount > 1 ? "s" : ""), fnMax), x + NODE_PADDING, y + h - 6);
-          }
-        }
-      }
+      drawNode(n, focus, k);
     }
+
     ctx.globalAlpha = 1;
     ctx.restore();
   }
 
-  function tick() {
-    buildQuadtree();
-    draw();
+  // ── QUADTREE (static, rebuilt once after layout) ──────────────────────────
+  function buildQuadtree() {
+    quadtree = d3.quadtree()
+      .x(d => d.x)
+      .y(d => d.y)
+      .addAll(nodes);
   }
 
   function precomputeNeighbors() {
-    // Map node.id → Set of neighbor ids (incl. self).
-    const byId = new Map(nodes.map((n) => [n.id, n]));
-    nodes.forEach((n) => { n._neighbors = new Set([n.id]); n._degree = 0; });
-    edges.forEach((e) => {
+    const byId = new Map(nodes.map(n => [n.id, n]));
+    nodes.forEach(n => { n._neighbors = new Set([n.id]); n._degree = 0; });
+    edges.forEach(e => {
       const s = typeof e.source === "object" ? e.source.id : e.source;
       const t = typeof e.target === "object" ? e.target.id : e.target;
       const sn = byId.get(s), tn = byId.get(t);
       if (sn && tn) {
-        sn._neighbors.add(t);
-        tn._neighbors.add(s);
+        sn._neighbors.add(t); tn._neighbors.add(s);
         sn._degree++; tn._degree++;
       }
     });
   }
 
-  function initSim() {
-    simulation = d3.forceSimulation(nodes)
-      .force("link", d3.forceLink(edges).id((d) => d.id).distance(80).strength(0.4))
-      .force("charge", d3.forceManyBody().strength(-300))
-      .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collide", d3.forceCollide().radius((d) => {
-        const w = nodeWidth(d), h = nodeHeight(d, 1);
-        return Math.sqrt(w * w + h * h) / 2 + 4;
-      }))
-      .on("tick", tick);
+  // After tree layout, resolve edge source/target to node objects
+  function resolveEdges() {
+    const byId = new Map(nodes.map(n => [n.id, n]));
+    edges.forEach(e => {
+      if (typeof e.source === "string") e.source = byId.get(e.source) || e.source;
+      if (typeof e.target === "string") e.target = byId.get(e.target) || e.target;
+    });
   }
 
+  // ── ZOOM (d3 + manual touch pinch) ────────────────────────────────────────
   function initZoom() {
     zoomBehavior = d3.zoom()
-      .scaleExtent([0.3, 2.5])
+      .scaleExtent([0.15, 3])
+      .filter(event => {
+        // Allow wheel zoom; allow mouse drag; skip touch (handled manually below)
+        return !event.type.startsWith("touch");
+      })
       .on("zoom", (event) => {
         transform = { x: event.transform.x, y: event.transform.y, k: event.transform.k };
         draw();
         updateZoomIndicator();
       });
     d3.select(canvas).call(zoomBehavior);
+
+    // ── Manual touch handling for mobile pan + pinch-zoom ─────────────────
+    let lastTouches = null;
+    let lastDist = null;
+    let lastMid = null;
+
+    function getTouchDist(t1, t2) {
+      const dx = t1.clientX - t2.clientX;
+      const dy = t1.clientY - t2.clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+    function getTouchMid(t1, t2) {
+      return { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
+    }
+
+    canvas.addEventListener("touchstart", ev => {
+      ev.preventDefault();
+      lastTouches = ev.touches;
+      if (ev.touches.length === 2) {
+        lastDist = getTouchDist(ev.touches[0], ev.touches[1]);
+        lastMid  = getTouchMid(ev.touches[0], ev.touches[1]);
+      }
+    }, { passive: false });
+
+    canvas.addEventListener("touchmove", ev => {
+      ev.preventDefault();
+      const touches = ev.touches;
+
+      if (touches.length === 1 && lastTouches && lastTouches.length === 1) {
+        // Single finger pan
+        const dx = touches[0].clientX - lastTouches[0].clientX;
+        const dy = touches[0].clientY - lastTouches[0].clientY;
+        const newT = d3.zoomIdentity
+          .translate(transform.x + dx, transform.y + dy)
+          .scale(transform.k);
+        d3.select(canvas).call(zoomBehavior.transform, newT);
+
+      } else if (touches.length === 2 && lastTouches && lastTouches.length >= 2) {
+        // Two-finger pinch zoom
+        const dist = getTouchDist(touches[0], touches[1]);
+        const mid  = getTouchMid(touches[0], touches[1]);
+        const rect = canvas.getBoundingClientRect();
+
+        if (lastDist && dist > 0) {
+          const scale = dist / lastDist;
+          const newK = Math.min(3, Math.max(0.15, transform.k * scale));
+
+          // Zoom toward pinch midpoint
+          const mx = mid.x - rect.left;
+          const my = mid.y - rect.top;
+          const wx = (mx - transform.x) / transform.k;
+          const wy = (my - transform.y) / transform.k;
+          const newX = mx - wx * newK;
+          const newY = my - wy * newK;
+
+          const newT = d3.zoomIdentity.translate(newX, newY).scale(newK);
+          d3.select(canvas).call(zoomBehavior.transform, newT);
+        }
+
+        // Also pan with two-finger drag
+        if (lastMid) {
+          const pdx = mid.x - lastMid.x;
+          const pdy = mid.y - lastMid.y;
+          if (Math.abs(pdx) > 0.1 || Math.abs(pdy) > 0.1) {
+            const panT = d3.zoomIdentity
+              .translate(transform.x + pdx, transform.y + pdy)
+              .scale(transform.k);
+            d3.select(canvas).call(zoomBehavior.transform, panT);
+          }
+        }
+
+        lastDist = dist;
+        lastMid  = mid;
+      }
+
+      lastTouches = touches;
+    }, { passive: false });
+
+    canvas.addEventListener("touchend", ev => {
+      ev.preventDefault();
+      lastTouches = ev.touches;
+      if (ev.touches.length < 2) { lastDist = null; lastMid = null; }
+    }, { passive: false });
   }
 
   function updateZoomIndicator() {
@@ -428,30 +689,45 @@
     if (!nodes.length) return;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const n of nodes) {
-      if (n.x < minX) minX = n.x;
-      if (n.y < minY) minY = n.y;
-      if (n.x > maxX) maxX = n.x;
-      if (n.y > maxY) maxY = n.y;
+      const w = nodeWidth(n), h = nodeHeight(n, 1);
+      if (n.x - w/2 < minX) minX = n.x - w/2;
+      if (n.y - h/2 < minY) minY = n.y - h/2;
+      if (n.x + w/2 > maxX) maxX = n.x + w/2;
+      if (n.y + h/2 > maxY) maxY = n.y + h/2;
     }
-    const pad = 60;
-    const w = (maxX - minX) || 1, h = (maxY - minY) || 1;
-    const k = Math.min(width / (w + pad * 2), height / (h + pad * 2), 2);
-    const tx = (width - (minX + maxX) * k) / 2;
-    const ty = (height - (minY + maxY) * k) / 2;
+    const pad = 40;
+    const tw = (maxX - minX) || 1, th = (maxY - minY) || 1;
+    const k = Math.min(width / (tw + pad * 2), height / (th + pad * 2), 2);
+    const tx = width / 2 - ((minX + maxX) / 2) * k;
+    const ty = height / 2 - ((minY + maxY) / 2) * k;
     d3.select(canvas).transition().duration(300)
       .call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
   }
 
   function panTo(node) {
     if (!node || typeof node.x !== "number") return;
-    const k = Math.max(transform.k, 1);
+    const k = Math.max(transform.k, 0.8);
     const tx = width / 2 - node.x * k;
     const ty = height / 2 - node.y * k;
     d3.select(canvas).transition().duration(280)
       .call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
   }
 
-  // Tooltip.
+  // ── RESIZE ────────────────────────────────────────────────────────────────
+  function resize() {
+    if (!wrap) return;
+    const rect = wrap.getBoundingClientRect();
+    width = Math.max(rect.width, 100);
+    height = Math.max(rect.height, 100);
+    dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+    draw();
+  }
+
+  // ── TOOLTIP ───────────────────────────────────────────────────────────────
   function showTooltip(node, ev) {
     const tip = document.getElementById("tooltip");
     if (!tip || !node) return;
@@ -463,11 +739,11 @@
         '<div class="tooltip-meta">⚠ ' + escapeHtml(node.unsupported_reason || "unsupported") + "</div>";
       tip.style.display = "block";
       tip.style.left = (ev.clientX + 14) + "px";
-      tip.style.top = (ev.clientY + 14) + "px";
+      tip.style.top  = (ev.clientY + 14) + "px";
       return;
     }
     const risk = node.risk_summary || "";
-    const fns = (node.functions || []).length;
+    const fns  = (node.functions || []).length;
     tip.innerHTML =
       '<div class="tooltip-filename">' + escapeHtml(basename(node.path || node.id)) + "</div>" +
       '<div class="tooltip-path">' + escapeHtml(node.path || node.id) + "</div>" +
@@ -475,7 +751,7 @@
       '<div class="tooltip-meta">' + escapeHtml(risk || (fns + " functions")) + "</div>";
     tip.style.display = "block";
     tip.style.left = (ev.clientX + 14) + "px";
-    tip.style.top = (ev.clientY + 14) + "px";
+    tip.style.top  = (ev.clientY + 14) + "px";
   }
 
   function hideTooltip() {
@@ -483,28 +759,23 @@
     if (tip) tip.style.display = "none";
   }
 
-  // B5: Edge hit detection — brute-force O(edges), ok for <500 edges
   function edgeAt(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
-    const sx = clientX - rect.left;
-    const sy = clientY - rect.top;
-    const wx = (sx - transform.x) / transform.k;
-    const wy = (sy - transform.y) / transform.k;
+    const wx = (clientX - rect.left - transform.x) / transform.k;
+    const wy = (clientY - rect.top  - transform.y) / transform.k;
     const threshold = 8 / transform.k;
     for (const e of edges) {
       const s = e.source, t = e.target;
       if (!s || !t || typeof s.x !== "number") continue;
-      // Point-to-bezier approximation: sample 10 points
-      const dx = t.x - s.x, dy = t.y - s.y;
-      const cx1 = s.x + dx * 0.4, cy1 = s.y;
-      const cx2 = s.x + dx * 0.6, cy2 = t.y;
+      const sx = s.x + NODE_W / 2, sy = s.y;
+      const tx2 = t.x - NODE_W / 2, ty2 = t.y;
+      const midX = (sx + tx2) / 2;
+      const cx1 = midX, cy1 = sy, cx2 = midX, cy2 = ty2;
       for (let i = 0; i <= 10; i++) {
-        const ti = i / 10;
-        const u = 1 - ti;
-        const px = u*u*u * s.x + 3*u*u*ti * cx1 + 3*u*ti*ti * cx2 + ti*ti*ti * t.x;
-        const py = u*u*u * s.y + 3*u*u*ti * cy1 + 3*u*ti*ti * cy2 + ti*ti*ti * t.y;
-        const dist = Math.sqrt((wx - px) ** 2 + (wy - py) ** 2);
-        if (dist < threshold) return e;
+        const ti = i / 10, u = 1 - ti;
+        const px = u*u*u*sx + 3*u*u*ti*cx1 + 3*u*ti*ti*cx2 + ti*ti*ti*tx2;
+        const py = u*u*u*sy + 3*u*u*ti*cy1 + 3*u*ti*ti*cy2 + ti*ti*ti*ty2;
+        if (Math.sqrt((wx-px)**2 + (wy-py)**2) < threshold) return e;
       }
     }
     return null;
@@ -515,20 +786,20 @@
     if (!tip || !edge) return;
     const type = edge.type || "imports";
     const label = type === "circular" ? "circular dependency"
-      : type === "function_call" ? "function call"
-      : "import";
+      : type === "function_call" ? "function call" : "import";
     tip.innerHTML = '<div class="tooltip-filename">' + escapeHtml(label) + '</div>';
     tip.style.display = "block";
     tip.style.left = (ev.clientX + 14) + "px";
-    tip.style.top = (ev.clientY + 14) + "px";
+    tip.style.top  = (ev.clientY + 14) + "px";
   }
 
+  // ── UTILITIES ─────────────────────────────────────────────────────────────
   function basename(p) {
     if (!p) return "";
     const i = p.lastIndexOf("/");
     return i >= 0 ? p.slice(i + 1) : p;
   }
-  window.graps.basename = basename;  // Finding 14: shared ke panel.js
+  window.graps.basename = basename;
 
   function escapeHtml(s) {
     return String(s == null ? "" : s)
@@ -537,13 +808,10 @@
   }
 
   function showWarnings(warnings) {
-    const banner = document.getElementById("warning-banner");
+    const banner  = document.getElementById("warning-banner");
     const summary = document.getElementById("warning-summary");
     if (!banner || !summary) return;
-    if (!warnings || warnings.length === 0) {
-      banner.style.display = "none";
-      return;
-    }
+    if (!warnings || warnings.length === 0) { banner.style.display = "none"; return; }
     banner.style.display = "";
     summary.textContent = warnings.length + " warning" + (warnings.length === 1 ? "" : "s") +
       " (" + summarizeWarningTypes(warnings) + ")";
@@ -551,40 +819,33 @@
 
   function summarizeWarningTypes(warnings) {
     const counts = {};
-    warnings.forEach((w) => { counts[w.type] = (counts[w.type] || 0) + 1; });
+    warnings.forEach(w => { counts[w.type] = (counts[w.type] || 0) + 1; });
     return Object.entries(counts).map(([t, c]) => t + "×" + c).join(", ");
   }
 
   function showEmpty(graph) {
     const empty = document.getElementById("empty-state");
-    if (!empty) return;
+    if (!empty) return true;
     const nNodes = (graph.nodes || []).length;
     let totalFns = 0;
-    (graph.nodes || []).forEach((n) => { totalFns += (n.functions || []).length; });
+    (graph.nodes || []).forEach(n => { totalFns += (n.functions || []).length; });
     if (nNodes === 0) {
       empty.innerHTML = emptyTpl("◇", "No Python files found",
-        "graps scanned " + escapeHtml(graph.meta && graph.meta.root || ".") +
-        " and found 0 .py files to analyze.",
-        "graps ./src");
-      empty.style.display = "";
-      return false;
+        "graps scanned " + escapeHtml((graph.meta && graph.meta.root) || ".") +
+        " and found 0 .py files to analyze.", "graps ./src");
+      empty.style.display = ""; return false;
     }
     if (totalFns === 0) {
       empty.innerHTML = emptyTpl("◇", "Files found, no functions detected",
-        "Your Python files may contain only constants, imports, or module-level code.",
-        null);
-      empty.style.display = "";
-      return false;
+        "Your Python files may contain only constants, imports, or module-level code.", null);
+      empty.style.display = ""; return false;
     }
     if (nNodes === 1 && (graph.edges || []).length === 0) {
       empty.innerHTML = emptyTpl("◉", "Single file (no imports)",
         "This file has no import relationships with other files.", null);
-      empty.style.display = "";
-      // Tetap render canvas — single node still useful.
-      return true;
+      empty.style.display = ""; return true;
     }
-    empty.style.display = "none";
-    return true;
+    empty.style.display = "none"; return true;
   }
 
   function emptyTpl(icon, title, desc, cmd) {
@@ -597,25 +858,21 @@
   function updateTopBarStats(meta) {
     const el = document.getElementById("topbar-stats");
     if (!el || !meta) return;
-    el.textContent = (meta.total_files || 0) + " files  " +
-      (meta.total_functions || 0) + " fns";
+    el.textContent = (meta.total_files || 0) + " files  " + (meta.total_functions || 0) + " fns";
   }
 
   function debounce(fn, ms) {
     let t = null;
-    return function () {
-      const args = arguments;
-      clearTimeout(t);
-      t = setTimeout(() => fn.apply(null, args), ms);
-    };
+    return function () { const a = arguments; clearTimeout(t); t = setTimeout(() => fn.apply(null, a), ms); };
   }
 
+  // ── GRAPH LOAD ────────────────────────────────────────────────────────────
   async function loadGraph() {
     try {
       const r = await fetch("/api/graph");
       if (!r.ok) throw new Error("HTTP " + r.status);
       const graph = await r.json();
-      setState({ graph: graph });
+      setState({ graph });
 
       hideLoading();
       updateTopBarStats(graph.meta);
@@ -624,16 +881,20 @@
       const shouldRender = showEmpty(graph);
       if (!shouldRender) return;
 
-      nodes = (graph.nodes || []).map((n) => Object.assign({}, n));
-      edges = (graph.edges || []).map((e) => Object.assign({}, e));
+      nodes = (graph.nodes || []).map(n => Object.assign({}, n));
+      edges = (graph.edges || []).map(e => Object.assign({}, e));
+
       precomputeNeighbors();
-      initSim();
+      computeTreeLayout();   // assign x/y based on import depth
+      resolveEdges();        // resolve string ids → node objects
+      buildQuadtree();
+
       initZoom();
+      fitToViewport();
       draw();
     } catch (err) {
       hideLoading();
       if (toast) toast("Failed to load graph: " + err.message, "error");
-      // ponytail: log untuk debug, tidak ada retry UI di MVP.
       console.error(err);
     }
   }
@@ -643,18 +904,15 @@
     if (s) s.style.display = "none";
   }
 
+  // ── INTERACTIONS ──────────────────────────────────────────────────────────
   function setupInteractions() {
-    canvas.addEventListener("mousemove", (ev) => {
+    canvas.addEventListener("mousemove", ev => {
       const n = nodeAt(ev.clientX, ev.clientY);
       if (n) {
-        // B5: edge tooltip only when no node under cursor
-        if (n !== store.state.hoveredNode) {
-          setState({ hoveredNode: n });
-        }
+        if (n !== store.state.hoveredNode) setState({ hoveredNode: n });
         showTooltip(n, ev);
         canvas.style.cursor = n.supported !== false ? "pointer" : "default";
       } else {
-        // Check edge hover
         const edge = edgeAt(ev.clientX, ev.clientY);
         if (edge) {
           if (store.state.hoveredNode) setState({ hoveredNode: null });
@@ -673,20 +931,17 @@
       hideTooltip();
     });
 
-    canvas.addEventListener("click", (ev) => {
+    canvas.addEventListener("click", ev => {
       const n = nodeAt(ev.clientX, ev.clientY);
       if (n && n.supported !== false) setState({ selectedNode: n });
     });
 
-    document.addEventListener("keydown", (ev) => {
+    document.addEventListener("keydown", ev => {
       const tag = (ev.target.tagName || "").toLowerCase();
       if (tag === "input" || tag === "textarea") return;
-      if (ev.key === "Escape") {
-        setState({ selectedNode: null });
-        hideTooltip();
-      } else if (ev.key === "f" || ev.key === "F") {
-        fitToViewport();
-      } else if (ev.key === "h" || ev.key === "H") {
+      if (ev.key === "Escape") { setState({ selectedNode: null }); hideTooltip(); }
+      else if (ev.key === "f" || ev.key === "F") { fitToViewport(); }
+      else if (ev.key === "h" || ev.key === "H") {
         const cur = store.state.filter;
         setState({ filter: Object.assign({}, cur, { risk: cur.risk === "high" ? null : "high" }) });
       } else if (ev.key === "d" || ev.key === "D") {
@@ -695,23 +950,17 @@
       }
     });
 
-    store.addEventListener("change", (e) => {
-      if (e.detail.keys.includes("filter") || e.detail.keys.includes("selectedNode") || e.detail.keys.includes("hoveredNode")) {
-        draw();
-      }
+    store.addEventListener("change", e => {
+      if (e.detail.keys.includes("filter") ||
+          e.detail.keys.includes("selectedNode") ||
+          e.detail.keys.includes("hoveredNode")) draw();
     });
 
-    // B6: openDirs filter — listen graps:dirs-changed from sidebar.js
-    window.addEventListener("graps:dirs-changed", () => {
-      draw();
-    });
+    window.addEventListener("graps:dirs-changed", () => draw());
 
-    window.addEventListener("graps:pan-to", (ev) => {
-      const node = nodes.find((n) => n.id === ev.detail.id || n.path === ev.detail.id);
-      if (node) {
-        panTo(node);
-        setState({ selectedNode: node });
-      }
+    window.addEventListener("graps:pan-to", ev => {
+      const node = nodes.find(n => n.id === ev.detail.id || n.path === ev.detail.id);
+      if (node) { panTo(node); setState({ selectedNode: node }); }
     });
 
     const toggle = document.getElementById("warning-toggle");
@@ -725,8 +974,9 @@
     }
   }
 
+  // ── BOOT ──────────────────────────────────────────────────────────────────
   function boot() {
-    wrap = document.getElementById("graph-wrap");
+    wrap   = document.getElementById("graph-wrap");
     canvas = document.getElementById("graph-canvas");
     if (!canvas || !wrap) return;
     ctx = canvas.getContext("2d");
@@ -743,9 +993,10 @@
   }
 
   window.graps.graph = {
-    panTo: panTo,
+    panTo,
     fit: fitToViewport,
     getNodes: () => nodes,
     getTransform: () => transform,
   };
 })();
+
