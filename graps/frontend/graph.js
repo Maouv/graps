@@ -4,8 +4,9 @@
  *   .panTo(node)  — center viewport ke node
  *   .fit()        — fit-to-viewport
  *
- * CHANGES v2:
- *   - Layout: D3 force → tree layout (LR, hirarki berdasarkan import depth)
+ * CHANGES v3:
+ *   - Layout: directory-depth columns (X = depth ONLY, Y = sibling order).
+ *     Edges are visual-only curves; force sim re-enabled for collision only.
  *   - Zoom: fix pinch-to-zoom di mobile (touch events manual)
  *   - Visual: card-style node (header / imports / functions / label section)
  *   - Semua state, API, interactions, backend, events TIDAK BERUBAH
@@ -68,6 +69,16 @@
   const TREE_COL_GAP    = 80;   // horizontal gap between columns
   const TREE_ROW_GAP    = 28;   // vertical gap between cards in same column
 
+  // ponytail: depth = path-segment count - 1 (same formula as sidebar.js
+  // buildDirTree — "the function that knows the depth, written before").
+  // Drives X column for BOTH dirs and files: a file's depth equals its parent
+  // dir depth + 1, so files land one column right of their parent folder.
+  function dirDepth(id) { return id.split("/").length - 1; }
+  window.graps.dirDepth = dirDepth;
+
+  // X for a given depth — fixed column grid (architectural blueprint, rule 1/2).
+  function colX(depth) { return 40 + NODE_W / 2 + depth * (NODE_W + TREE_COL_GAP); }
+
   function nodeWidth() { return NODE_W; }
 
   function nodeHeight(n, zoomK) {
@@ -95,90 +106,67 @@
     return i > 0 ? text.slice(0, i) + ell : ell;
   }
 
-  // ── TREE LAYOUT ───────────────────────────────────────────────────────────
-  // Assign x/y to each node based on import depth (topological BFS).
-  // Nodes with no incoming edges = column 0 (roots).
-  // Each edge source→target means target is at least col(source)+1.
+  // ── TREE LAYOUT (directory hierarchy, NOT import graph) ───────────────────
+  // Rules: X = directory depth ONLY (rule 1). Same depth → same X (rule 2).
+  // Y = sibling order inside the dir tree (rule 3). Edges never move nodes
+  // (rule 4). No force determines hierarchy (rule 5). Parent-child stays
+  // hierarchical via columns (rule 6). Empty space > overlap (rule 9).
   function computeTreeLayout() {
     if (!nodes.length) return;
-
-    const byId = new Map(nodes.map(n => [n.id, n]));
-
-    // Build adjacency from raw edge list (edges may still have string ids here)
-    const outEdges = new Map();  // id → [target_id, ...]
-    const inDegree = new Map();
-    nodes.forEach(n => { outEdges.set(n.id, []); inDegree.set(n.id, 0); });
-
-    edges.forEach(e => {
-      const sid = typeof e.source === "object" ? e.source.id : e.source;
-      const tid = typeof e.target === "object" ? e.target.id : e.target;
-      if (!byId.has(sid) || !byId.has(tid)) return;
-      outEdges.get(sid).push(tid);
-      inDegree.set(tid, (inDegree.get(tid) || 0) + 1);
-    });
-
-    // BFS from roots to assign column (depth)
-    const col = new Map();
-    const queue = [];
+    const byDepth = new Map();
     nodes.forEach(n => {
-      if ((inDegree.get(n.id) || 0) === 0) {
-        col.set(n.id, 0);
-        queue.push(n.id);
-      }
+      const d = dirDepth(n.id);
+      if (!byDepth.has(d)) byDepth.set(d, []);
+      byDepth.get(d).push(n);
     });
-
-    // Handle cycles / orphans: any unvisited gets col 0
-    if (queue.length === 0) {
-      nodes.forEach(n => { col.set(n.id, 0); queue.push(n.id); });
-    }
-
-    let qi = 0;
-    while (qi < queue.length) {
-      const id = queue[qi++];
-      const c = col.get(id) || 0;
-      (outEdges.get(id) || []).forEach(tid => {
-        if (!col.has(tid) || col.get(tid) < c + 1) {
-          col.set(tid, c + 1);
-          queue.push(tid);
-        }
-      });
-    }
-    // Stragglers (in cycles not reached)
-    nodes.forEach(n => { if (!col.has(n.id)) col.set(n.id, 0); });
-
-    // Group nodes by column
-    const cols = new Map();
-    nodes.forEach(n => {
-      const c = col.get(n.id) || 0;
-      if (!cols.has(c)) cols.set(c, []);
-      cols.get(c).push(n);
-    });
-
-    // Assign x per column, y per row within column
-    // x: based on column index, spaced by NODE_W + TREE_COL_GAP
-    // y: centered in viewport, spaced by nodeHeight + TREE_ROW_GAP
-    const sortedCols = [...cols.keys()].sort((a, b) => a - b);
-    let curX = NODE_W / 2 + 40;
-
-    sortedCols.forEach(ci => {
-      const colNodes = cols.get(ci);
-      // Sort nodes within col by id for stability
-      colNodes.sort((a, b) => a.id.localeCompare(b.id));
-
-      const colH = colNodes.reduce((acc, n) => {
-        return acc + nodeHeight(n, 1) + TREE_ROW_GAP;
-      }, -TREE_ROW_GAP);
-
-      let curY = -colH / 2;
-      colNodes.forEach(n => {
+    [...byDepth.keys()].sort((a, b) => a - b).forEach(d => {
+      // sibling order: lexicographic path = directory tree order (rule 3)
+      const col = byDepth.get(d).sort((a, b) => a.id.localeCompare(b.id));
+      let stack = -TREE_ROW_GAP;
+      col.forEach(n => { stack += nodeHeight(n, 1) + TREE_ROW_GAP; });
+      let y = -stack / 2;
+      col.forEach(n => {
         const h = nodeHeight(n, 1);
-        n.x = curX;
-        n.y = curY + h / 2;
-        curY += h + TREE_ROW_GAP;
+        n.x = colX(d);       // X fixed by depth (rule 1)
+        n.y = y + h / 2;     // Y by sibling stack (rule 3)
+        y += h + TREE_ROW_GAP;
       });
-
-      curX += NODE_W + TREE_COL_GAP;
     });
+  }
+
+  // Synthesize directory nodes so the filesystem hierarchy is visible.
+  // Backend only emits file nodes; dirs derived from id prefixes — same
+  // algorithm as sidebar.js buildDirTree. Renderer already handles isDir.
+  function synthesizeDirNodes() {
+    const dirIds = new Set();
+    nodes.forEach(n => {
+      const parts = n.id.split("/");
+      for (let i = 1; i < parts.length; i++) dirIds.add(parts.slice(0, i).join("/"));
+    });
+    const have = new Set(nodes.map(n => n.id));
+    const dirNodes = Array.from(dirIds).filter(d => !have.has(d)).map(d => ({
+      id: d, type: "directory", is_directory: true, path: d,
+      functions: [], imports: [], classes: [], constants: [],
+      supported: true, risk_level: "clean", risk_summary: null,
+    }));
+    nodes = nodes.concat(dirNodes);
+  }
+
+  // ponytail: force simulation re-enabled, collision-avoidance ONLY (rule 5).
+  // No link/charge/center → hierarchy stays depth-driven. X re-snapped to the
+  // depth column after cooldown so rule 1 (X = depth only) holds. With
+  // TREE_ROW_GAP spacing this is a no-op safety net; ceiling: a single column
+  // with thousands of nodes would need a bigger gap or per-row collision.
+  function runCollisionOnly() {
+    if (!nodes.length || !window.d3 || !d3.forceSimulation) return;
+    simulation = d3.forceSimulation(nodes)
+      .force("collide", d3.forceCollide()
+        .radius(d => Math.max(nodeHeight(d, 1), NODE_HEADER_H) / 2 + TREE_ROW_GAP / 2)
+        .strength(1))
+      .stop();
+    for (let i = 0; i < 120; i++) simulation.tick();
+    nodes.forEach(n => { n.x = colX(dirDepth(n.id)); }); // lock X back to depth
+    simulation.stop();
   }
 
   // ── HIT DETECTION ────────────────────────────────────────────────────────
@@ -884,9 +872,11 @@
       nodes = (graph.nodes || []).map(n => Object.assign({}, n));
       edges = (graph.edges || []).map(e => Object.assign({}, e));
 
+      synthesizeDirNodes();    // add directory nodes for hierarchy visibility
       precomputeNeighbors();
-      computeTreeLayout();   // assign x/y based on import depth
-      resolveEdges();        // resolve string ids → node objects
+      computeTreeLayout();     // X by directory depth, Y by sibling order
+      runCollisionOnly();      // collision-avoidance only, X locked (rule 5)
+      resolveEdges();          // resolve string ids → node objects
       buildQuadtree();
 
       initZoom();

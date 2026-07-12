@@ -62,7 +62,7 @@
     const isMobile = window.matchMedia("(max-width: 768px)").matches;
     return dirs.map((dir) => {
       const parts = dir.split("/");
-      const depth = parts.length - 1;
+      const depth = (window.graps.dirDepth || (id => id.split("/").length - 1))(dir);
       const name = isMobile
         ? parts.slice(-2).join("/") + "/"
         : parts[parts.length - 1] + "/";
