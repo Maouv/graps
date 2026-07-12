@@ -21,7 +21,7 @@
   let canvas, ctx, wrap;
   let width = 0, height = 0, dpr = 1;
   let nodes = [], edges = [];
-  let simulation = null;  // kept for API compat, null in tree mode
+  let visibleNodesCache = []; // subset of `nodes` yang sedang visible (lazy-render)
   let quadtree = null;
   let transform = { x: 0, y: 0, k: 1 };
   let zoomBehavior = null;
@@ -76,6 +76,19 @@
   function dirDepth(id) { return id.split("/").length - 1; }
   window.graps.dirDepth = dirDepth;
 
+  // ponytail: lazy-render visibility gate. depth-0 selalu visible; node lebih
+  // dalam cuma visible kalau DIRECT PARENT-nya di-expand. Bukan "any ancestor"
+  // — kalau any ancestor, expand src langsung render seluruh subtree (cascade
+  // visual), kontradiksi §2 "cuma buka level ini". Exact parent string match
+  // juga sekalian solve §6 #1 (src2/x.py nggak ke-match openDir src).
+  function isNodeVisible(node, openDirsSet) {
+    const depth = dirDepth(node.id);
+    if (depth === 0) return true;
+    const parts = node.id.split("/");
+    const parent = parts.slice(0, parts.length - 1).join("/");
+    return openDirsSet.has(parent);
+  }
+
   // X for a given depth — fixed column grid (architectural blueprint, rule 1/2).
   function colX(depth) { return 40 + NODE_W / 2 + depth * (NODE_W + TREE_COL_GAP); }
 
@@ -111,17 +124,28 @@
   // Y = sibling order inside the dir tree (rule 3). Edges never move nodes
   // (rule 4). No force determines hierarchy (rule 5). Parent-child stays
   // hierarchical via columns (rule 6). Empty space > overlap (rule 9).
-  function computeTreeLayout() {
-    if (!nodes.length) return;
+  function visibleNodeList() {
+    const openDirsSet = store.state.graphOpenDirs || new Set();
+    return nodes.filter(n => isNodeVisible(n, openDirsSet));
+  }
+
+  function computeTreeLayout(nodeList) {
+    if (!nodeList.length) return;
     const byDepth = new Map();
-    nodes.forEach(n => {
+    nodeList.forEach(n => {
       const d = dirDepth(n.id);
       if (!byDepth.has(d)) byDepth.set(d, []);
       byDepth.get(d).push(n);
     });
     [...byDepth.keys()].sort((a, b) => a - b).forEach(d => {
-      // sibling order: lexicographic path = directory tree order (rule 3)
-      const col = byDepth.get(d).sort((a, b) => a.id.localeCompare(b.id));
+      // sibling order: folder DULU, baru file — lexicographic dalam tiap grup
+      // (requirement eksplisit plan §5.3: "folder dulu baru file")
+      const col = byDepth.get(d).sort((a, b) => {
+        const aDir = a.is_directory || a.type === "directory";
+        const bDir = b.is_directory || b.type === "directory";
+        if (aDir !== bDir) return aDir ? -1 : 1;
+        return a.id.localeCompare(b.id);
+      });
       let stack = -TREE_ROW_GAP;
       col.forEach(n => { stack += nodeHeight(n, 1) + TREE_ROW_GAP; });
       let y = -stack / 2;
@@ -152,22 +176,66 @@
     nodes = nodes.concat(dirNodes);
   }
 
-  // ponytail: force simulation re-enabled, collision-avoidance ONLY (rule 5).
-  // No link/charge/center → hierarchy stays depth-driven. X re-snapped to the
-  // depth column after cooldown so rule 1 (X = depth only) holds. With
-  // TREE_ROW_GAP spacing this is a no-op safety net; ceiling: a single column
-  // with thousands of nodes would need a bigger gap or per-row collision.
-  function runCollisionOnly() {
-    if (!nodes.length || !window.d3 || !d3.forceSimulation) return;
-    simulation = d3.forceSimulation(nodes)
-      .force("collide", d3.forceCollide()
-        .radius(d => Math.max(nodeHeight(d, 1), NODE_HEADER_H) / 2 + TREE_ROW_GAP / 2)
-        .strength(1))
-      .stop();
-    for (let i = 0; i < 120; i++) simulation.tick();
-    nodes.forEach(n => { n.x = colX(dirDepth(n.id)); }); // lock X back to depth
-    simulation.stop();
+  // ponytail: lazy-render orchestrator. Dipanggil tiap kali visibility
+  // (graphOpenDirs) berubah. Silent-failure guard §6 #7: kalau lupa panggil ini
+  // setelah setState graphOpenDirs, canvas nggak update — wajib di tiap toggle.
+  function relayout() {
+    visibleNodesCache = visibleNodeList();
+    computeTreeLayout(visibleNodesCache);
+    buildQuadtree();
+    draw();
   }
+
+  // ── QUADTREE (rebuilt per relayout, atas visible subset only) ───────────────
+  function buildQuadtree() {
+    quadtree = d3.quadtree()
+      .x(d => d.x)
+      .y(d => d.y)
+      .addAll(visibleNodesCache);
+  }
+
+  // ── FOLDER TOGGLE (canvas expand/collapse, independen dari sidebar) ────────
+  // ponytail: collapse reset folder + SEMUA descendant (no memory, §5.9).
+  // Auto-deselect kalau selectedNode jadi hidden karena ancestor collapse (§6 #5).
+  function toggleFolder(dirId) {
+    const current = store.state.graphOpenDirs || new Set();
+    const next = new Set(current);
+
+    if (next.has(dirId)) {
+      // COLLAPSE — reset folder ini DAN semua descendant-nya (keputusan final: no memory)
+      next.delete(dirId);
+      for (const id of Array.from(next)) {
+        if (id.startsWith(dirId + "/")) next.delete(id);
+      }
+      // auto-deselect kalau selectedNode sekarang jadi hidden
+      const sel = store.state.selectedNode;
+      if (sel && (sel.id === dirId || sel.id.startsWith(dirId + "/"))) {
+        setState({ graphOpenDirs: next, selectedNode: null });
+        relayout();
+        return;
+      }
+    } else {
+      // EXPAND — cuma buka level ini, TIDAK cascade buka semua descendant
+      next.add(dirId);
+    }
+
+    setState({ graphOpenDirs: next });
+    relayout();
+  }
+
+  // §5.10: expand semua ancestor folder node target — dipakai search & pan-to
+  // ke node yang sedang hidden. Set.add idempotent, aman walau sebagian sudah expand.
+  function expandPathTo(nodeId) {
+    const parts = nodeId.split("/");
+    const current = store.state.graphOpenDirs || new Set();
+    const next = new Set(current);
+    for (let i = 1; i < parts.length; i++) {
+      next.add(parts.slice(0, i).join("/"));
+    }
+    setState({ graphOpenDirs: next });
+    relayout();
+  }
+
 
   // ── HIT DETECTION ────────────────────────────────────────────────────────
   function nodeAt(clientX, clientY) {
@@ -464,9 +532,12 @@
     const focus = sel || hov;
 
     // ── EDGES ─────────────────────────────────────────────────────────────
+    const visibleIds = new Set(visibleNodesCache.map(n => n.id));
     for (const e of edges) {
       const s = e.source, t = e.target;
       if (!s || !t || typeof s.x !== "number") continue;
+      // lazy-render: skip edge kalau source/target sedang hidden (§5.7)
+      if (!visibleIds.has(s.id) || !visibleIds.has(t.id)) continue;
 
       const edgeType = e.type || "imports";
       const color = edgeType === "circular"
@@ -520,30 +591,14 @@
     ctx.globalAlpha = 1;
 
     // ── NODES ─────────────────────────────────────────────────────────────
-    const _openDirs = store.state.openDirs;
-    const _dirFilter = _openDirs && _openDirs.size > 0;
-    for (const n of nodes) {
-      if (_dirFilter) {
-        const parts = n.id.split("/");
-        let visible = false;
-        for (let i = 1; i <= parts.length; i++) {
-          if (_openDirs.has(parts.slice(0, i).join("/"))) { visible = true; break; }
-        }
-        if (!visible) continue;
-      }
+    // lazy-render: iterasi visible subset aja (§5.7). Filter lama baca
+    // store.state.openDirs (milik sidebar) — salah state, sudah dihapus.
+    for (const n of visibleNodesCache) {
       drawNode(n, focus, k);
     }
 
     ctx.globalAlpha = 1;
     ctx.restore();
-  }
-
-  // ── QUADTREE (static, rebuilt once after layout) ──────────────────────────
-  function buildQuadtree() {
-    quadtree = d3.quadtree()
-      .x(d => d.x)
-      .y(d => d.y)
-      .addAll(nodes);
   }
 
   function precomputeNeighbors() {
@@ -674,9 +729,9 @@
   }
 
   function fitToViewport() {
-    if (!nodes.length) return;
+    if (!visibleNodesCache.length) return;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const n of nodes) {
+    for (const n of visibleNodesCache) {
       const w = nodeWidth(n), h = nodeHeight(n, 1);
       if (n.x - w/2 < minX) minX = n.x - w/2;
       if (n.y - h/2 < minY) minY = n.y - h/2;
@@ -872,16 +927,15 @@
       nodes = (graph.nodes || []).map(n => Object.assign({}, n));
       edges = (graph.edges || []).map(e => Object.assign({}, e));
 
-      synthesizeDirNodes();    // add directory nodes for hierarchy visibility
-      precomputeNeighbors();
-      computeTreeLayout();     // X by directory depth, Y by sibling order
-      runCollisionOnly();      // collision-avoidance only, X locked (rule 5)
-      resolveEdges();          // resolve string ids → node objects
-      buildQuadtree();
+      synthesizeDirNodes();       // TETAP generate semua dir node (data lengkap di memory — lazy RENDER bukan lazy FETCH)
+      precomputeNeighbors();      // atas full nodes — _neighbors dipakai isDimmed saat select
+      resolveEdges();             // resolve string ids → node objects (atas full nodes)
+      setState({ graphOpenDirs: new Set() });  // default: semua collapsed
+      relayout();                 // layout + quadtree + draw atas visible subset (§5.12)
 
       initZoom();
       fitToViewport();
-      draw();
+      // draw() dipanggil di dalam relayout() — tidak perlu panggil lagi di sini.
     } catch (err) {
       hideLoading();
       if (toast) toast("Failed to load graph: " + err.message, "error");
@@ -923,7 +977,15 @@
 
     canvas.addEventListener("click", ev => {
       const n = nodeAt(ev.clientX, ev.clientY);
-      if (n && n.supported !== false) setState({ selectedNode: n });
+      if (!n) return;
+      // lazy-render §5.9: klik folder → toggle expand/collapse (canvas state).
+      // Klik file → behavior lama (selectNode + panel).
+      const isDir = n.is_directory || n.type === "directory";
+      if (isDir) {
+        toggleFolder(n.id);
+        return;
+      }
+      if (n.supported !== false) setState({ selectedNode: n });
     });
 
     document.addEventListener("keydown", ev => {
@@ -949,8 +1011,13 @@
     window.addEventListener("graps:dirs-changed", () => draw());
 
     window.addEventListener("graps:pan-to", ev => {
+      // §5.11: cari di FULL data (nodes) — target belum tentu visible,
+      // itu justru kasus yang di-handle: expand ancestor dulu, baru pan.
       const node = nodes.find(n => n.id === ev.detail.id || n.path === ev.detail.id);
-      if (node) { panTo(node); setState({ selectedNode: node }); }
+      if (!node) return;
+      expandPathTo(node.id);
+      panTo(node);
+      setState({ selectedNode: node });
     });
 
     const toggle = document.getElementById("warning-toggle");
@@ -985,7 +1052,8 @@
   window.graps.graph = {
     panTo,
     fit: fitToViewport,
-    getNodes: () => nodes,
+    getNodes: () => nodes,                      // TETAP full data
+    getVisibleNodes: () => visibleNodesCache,   // BARU — subset visible (lazy-render)
     getTransform: () => transform,
   };
 })();

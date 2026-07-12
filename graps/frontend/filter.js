@@ -20,7 +20,8 @@
     hoveredNode: null,
     filter: { risk: null, dead: false }, // risk: null|'high'
     sidePanel: false,   // bool — apakah side panel terbuka
-    openDirs: new Set(), // Set<string> — directory yang di-expand user
+    openDirs: new Set(), // Set<string> — directory yang di-expand user (sidebar.js, JANGAN disentuh graph.js)
+    graphOpenDirs: new Set(), // Set<string> — canvas expand/collapse state (graph.js SAJA, independen dari openDirs)
     aiHistory: [],       // array — conversation history session ini
     activePanel: null,   // null|'sidebar'|'sidepanel'|'ai' — mobile: panel terbuka
   };
