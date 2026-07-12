@@ -254,6 +254,20 @@
     return (wx >= nx && wx <= nx + w && wy >= ny && wy <= ny + h) ? found : null;
   }
 
+  // ── SHARED NODE INTERACTION ───────────────────────────────────────────────
+  // ponytail: dipakai "click" (mouse) DAN tap-detection (touch). Di touch device,
+  // touchstart manggil preventDefault() buat nyegah native scroll pas pan/pinch —
+  // efek samping: synthesized "click" gak di-fire, jadi node interaction (toggleFolder
+  // / selectNode) yang cuma listen "click" gak pernah kepanggil di Mises. Solusi:
+  // tap di-handle eksplisit di touchend lewat sini, bukan lewat click.
+  function handleNodeInteraction(clientX, clientY) {
+    const n = nodeAt(clientX, clientY);
+    if (!n) return;
+    const isDir = n.is_directory || n.type === "directory";
+    if (isDir) { toggleFolder(n.id); return; }
+    if (n.supported !== false) setState({ selectedNode: n });
+  }
+
   // ── DRAW HELPERS ──────────────────────────────────────────────────────────
   function roundRect(ctx, x, y, w, h, r) {
     ctx.beginPath();
@@ -639,10 +653,15 @@
       });
     d3.select(canvas).call(zoomBehavior);
 
-    // ── Manual touch handling for mobile pan + pinch-zoom ─────────────────
+    // ── Manual touch handling for mobile pan + pinch-zoom + tap-to-select ────
     let lastTouches = null;
     let lastDist = null;
     let lastMid = null;
+    // tap detection: hanya single-touch yang gak bergerak + cepat = tap node.
+    let touchStartPos = null;
+    let touchStartTime = 0;
+    const TAP_MOVE_THRESHOLD = 10; // px — geser lebih dari ini = pan, bukan tap
+    const TAP_MAX_DURATION = 400;  // ms — tekan lama = bukan tap
 
     function getTouchDist(t1, t2) {
       const dx = t1.clientX - t2.clientX;
@@ -656,15 +675,31 @@
     canvas.addEventListener("touchstart", ev => {
       ev.preventDefault();
       lastTouches = ev.touches;
-      if (ev.touches.length === 2) {
-        lastDist = getTouchDist(ev.touches[0], ev.touches[1]);
-        lastMid  = getTouchMid(ev.touches[0], ev.touches[1]);
+      if (ev.touches.length === 1) {
+        // calon tap — cat posisi + waktu, di-invalidate di touchmove kalau geser.
+        touchStartPos = { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
+        touchStartTime = Date.now();
+      } else {
+        touchStartPos = null; // multi-touch = pinch, bukan tap
+        if (ev.touches.length === 2) {
+          lastDist = getTouchDist(ev.touches[0], ev.touches[1]);
+          lastMid  = getTouchMid(ev.touches[0], ev.touches[1]);
+        }
       }
     }, { passive: false });
 
     canvas.addEventListener("touchmove", ev => {
       ev.preventDefault();
       const touches = ev.touches;
+
+      // invalidate tap kalau geser signifikan / jadi multi-touch
+      if (touchStartPos && touches.length === 1) {
+        const dx = touches[0].clientX - touchStartPos.x;
+        const dy = touches[0].clientY - touchStartPos.y;
+        if (Math.hypot(dx, dy) > TAP_MOVE_THRESHOLD) touchStartPos = null;
+      } else if (touches.length !== 1) {
+        touchStartPos = null;
+      }
 
       if (touches.length === 1 && lastTouches && lastTouches.length === 1) {
         // Single finger pan
@@ -718,6 +753,12 @@
 
     canvas.addEventListener("touchend", ev => {
       ev.preventDefault();
+      // tap valid: single-touch start, gak ke-invalidate di touchmove, cepat, semua jari lepas.
+      if (touchStartPos && ev.touches.length === 0 &&
+          (Date.now() - touchStartTime) < TAP_MAX_DURATION) {
+        handleNodeInteraction(touchStartPos.x, touchStartPos.y);
+      }
+      touchStartPos = null;
       lastTouches = ev.touches;
       if (ev.touches.length < 2) { lastDist = null; lastMid = null; }
     }, { passive: false });
@@ -976,16 +1017,9 @@
     });
 
     canvas.addEventListener("click", ev => {
-      const n = nodeAt(ev.clientX, ev.clientY);
-      if (!n) return;
-      // lazy-render §5.9: klik folder → toggle expand/collapse (canvas state).
-      // Klik file → behavior lama (selectNode + panel).
-      const isDir = n.is_directory || n.type === "directory";
-      if (isDir) {
-        toggleFolder(n.id);
-        return;
-      }
-      if (n.supported !== false) setState({ selectedNode: n });
+      // jalur mouse — di touch device click synthesized gak di-fire karena
+      // touchstart preventDefault(), tap di-handle eksplisit di touchend.
+      handleNodeInteraction(ev.clientX, ev.clientY);
     });
 
     document.addEventListener("keydown", ev => {
