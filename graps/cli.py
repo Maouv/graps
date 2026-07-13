@@ -205,6 +205,17 @@ def main(
         f"  └── Risk analysis complete: {risks['high']} high, "
         f"{risks['medium']} medium, {risks['low']} low"
     )
+    # edge-resolution-bug: silent-failure guard. Kalau repo Python >= 5 file
+    # punya import tapi 0 edge, kemungkinan adapter/resolver format drift lagi
+    # (sebelumnya tree-sitter adapter isi target raw statement → semua edge drop).
+    # Warning non-blocking — tidak exit, hanya kasih signal ke user.
+    if edges_n == 0 and files_n > 5:
+        py_with_imports = sum(1 for r in results if r.language == "python" and r.imports)
+        if py_with_imports >= 2:
+            typer.echo(
+                "  ! Warning: 0 edges detected with Python imports present — "
+                "possible resolver/adapter issue (target format drift)"
+            )
     typer.echo("")
 
     # AI provider env masking. get_provider order Anthropic-first → ini cara

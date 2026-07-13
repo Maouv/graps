@@ -57,3 +57,23 @@ def test_resolvesafe__follows_symlink(tmp_path):
     link = tmp_path / "link.py"
     os.symlink(real, link)
     assert resolve_safe(link) == real
+
+
+def test_resolve_import__raw_statement_returns_none(tmp_path):
+    """edge-resolution-bug regression guard: kontrak ``ParsedImport.target`` =
+    dotted module path. Raw statement text (``"from x import y"``) jelas invalid
+    sebagai module path → resolver harus return None, bukan crash atau edge
+    false-positive. Sebelum adapter fix, tree-sitter mengisi target dengan raw
+    statement → resolver cari file ``root/from x/...py`` → None → semua edge
+    drop silent."""
+    raw = ParsedImport(target="from graps.scanner import ParsedFile, ParsedImport", lineno=1)
+    assert resolve_import(raw, tmp_path / "main.py", tmp_path) is None
+
+
+def test_resolve_import__dotted_module_resolves(tmp_path):
+    """Positive regression guard: dotted module path (output fixed adapter) harus
+    resolve — bukti adapter fix mengembalikan edge creation (sebelumnya 0 edge)."""
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "mod.py").write_text("")
+    dotted = ParsedImport(target="pkg.mod", lineno=1)
+    assert resolve_import(dotted, tmp_path / "main.py", tmp_path) == Path("pkg/mod.py")

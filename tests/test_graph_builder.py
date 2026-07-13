@@ -8,9 +8,15 @@ Sanitize wiring (C-01) is tested via _sanitized_constants helper directly.
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 from graps.scanner import ParsedFile
 from graps.scanner.ast_parser import safe_parse
 from graps.scanner.graph_builder import build_graph, _sanitized_constants
+from graps.scanner.tree_sitter_parser import TreeSitterParser
+
+# tree-sitter-language-pack opsional. Test ``test_build_graph__edge_via_tree_sitter``
+# di-skip inline kalau absent; test lain pakai ast_parser dan tetap jalan.
 
 
 def _make_project(tmp_path):
@@ -91,6 +97,39 @@ def test_build_graph__edge_shape(tmp_path):
     assert e["weight"] >= 1
     assert isinstance(e["imported_names"], list)
     assert not e["source"].startswith("/") and not e["target"].startswith("/")
+
+
+def test_build_graph__edge_via_tree_sitter(tmp_path):
+    """edge-resolution-bug end-to-end guard: parse fixture via TreeSitterParser
+    (bukan synthetic ParsedFile), build_graph, assert edge ter-buat.
+
+    Sebelum adapter fix: TreeSitterParser isi ``target`` dengan raw statement
+    text (``"from .sub import helper"``) → resolver None → 0 edge. Setelah fix:
+    ``target = ".sub.helper"`` → resolve ke ``sub.py`` → edge ter-buat."""
+    # Skip kalau tree-sitter-language-pack absent (test lain pakai ast_parser).
+    pytest.importorskip("tree_sitter_language_pack", reason="tslp not installed")
+    # Build a minimal relative-import project under tmp_path.
+    pkg = tmp_path / "relpkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "sub.py").write_text("def helper():\n    return 1\n")
+    (pkg / "main.py").write_text("from .sub import helper\n\ndef run():\n    return helper()\n")
+
+    ts = TreeSitterParser()
+    files = sorted(tmp_path.rglob("*.py"))
+    results = [ts.parse_file(p, tmp_path) for p in files]
+    results = [r for r in results if r is not None]
+
+    g = build_graph(results, tmp_path)
+    edges = g["edges"]
+    assert len(edges) >= 1, (
+        f"expected >= 1 edge via tree-sitter path, got 0 (adapter raw-statement "
+        f"bug regression); imports={[i.target for r in results for i in r.imports]}"
+    )
+    # Edge main.py → sub.py harus ada (relative import resolved).
+    pairs = {(e["source"], e["target"]) for e in edges}
+    assert ("relpkg/main.py", "relpkg/sub.py") in pairs, \
+        f"edge relpkg/main.py → relpkg/sub.py missing; got {pairs}"
 
 
 def test_build_graph__star_import_emits_warning_no_edge(tmp_path):

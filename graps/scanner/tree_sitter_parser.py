@@ -78,7 +78,7 @@ class TreeSitterParser:
 
         # ── Map ProcessResult → ParsedFile ──────────────────────────
         functions = _extract_functions(result.structure)
-        imports = _extract_imports(result.imports)
+        imports = _extract_imports(result.imports, lang)
         classes = _extract_classes(result.structure)
         exported_names = _extract_exports(result.exports)
 
@@ -141,8 +141,70 @@ def _extract_functions(structure: list[Any]) -> list[ParsedFunction]:
     return results
 
 
-def _extract_imports(imports: list[Any]) -> list[ParsedImport]:
+def _strip_alias(name: str) -> str:
+    """``import X as Y`` → ``X`` (ambil nama modul, buang alias). Match ast ``alias.name``."""
+    return name.split(" as ")[0].strip()
+
+
+def _normalize_import_source(source: str, is_wildcard: bool) -> list[str]:
+    """Parse raw Python import statement text → list of dotted module paths.
+
+    Match contract ast_parser ``visit_Import``/``visit_ImportFrom``: emit 1 target
+    per alias (``from X import Y, Z`` → ``["X.Y", "X.Z"]``). Pure-function, no
+    side-effect. ``[]`` kalau source tidak match pattern import valid (guard
+    false-positive tree-sitter — jangan crash).
+
+    Bentuk yang dihandle:
+      ``import X`` / ``import X.Y`` / ``import X as Y`` / ``import X, Y``
+        → ``["X"]`` / ``["X.Y"]`` / ``["X"]`` / ``["X", "Y"]``
+      ``from X import Y`` / ``from X import Y, Z`` → ``["X.Y"]`` / ``["X.Y", "X.Z"]``
+      ``from .X import Y`` / ``from . import Y`` / ``from ..X import Y``
+        → ``[".X.Y"]`` / ``[".Y"]`` / ``["..X.Y"]``  (relative — preserve leading dots)
+      ``from X import *`` (is_wildcard=True) → ``["X"]``  (base saja, caller set is_star)
+    """
+    s = source.strip()
+    if not s:
+        return []
+
+    # import X  /  import X.Y  /  import X as Y  /  import X, Y
+    if s.startswith("import ") and not s.startswith("import_"):
+        names = s[len("import "):]
+        names = names.replace("(", " ").replace(")", " ")
+        return [_strip_alias(n) for n in names.split(",") if _strip_alias(n)]
+
+    # from X import Y, Z  /  from .X import Y  /  from X import *
+    if s.startswith("from ") and " import " in s:
+        rest = s[len("from "):]
+        mod_part, _, names_part = rest.partition(" import ")
+        base = mod_part.strip()
+        if not base:
+            return []
+        if is_wildcard:
+            return [base]
+        # Multi-line paren: ``from X import (\n Y,\n Z\n)`` — tree-sitter preserve
+        # parens + newline. Strip parens, split by comma/whitespace, drop empties.
+        names_part = names_part.replace("(", " ").replace(")", " ")
+        names = [n.strip() for n in names_part.replace("\n", ",").split(",")]
+        names = [_strip_alias(n) for n in names if _strip_alias(n)]
+        if not names:
+            return []
+        # Relative import (``from .X import Y``) — preserve leading dots, no separator.
+        # Match ast: ``sep = "" if base.endswith(".") else "."``.
+        sep = "" if base.endswith(".") else "."
+        return [f"{base}{sep}{name}" for name in names]
+
+    return []  # bukan import valid → emit 0, jangan crash
+
+
+def _extract_imports(imports: list[Any], language: str = "python") -> list[ParsedImport]:
     """Map ImportInfo → ParsedImport.
+
+    For ``language == "python"``: parse raw ``imp.source`` via
+    :func:`_normalize_import_source` → list of dotted targets, emit 1
+    ``ParsedImport`` per target (match ast_parser contract so
+    :func:`resolve_import` gets a single dotted format). Non-Python:
+    behavior lama ``target=imp.source`` (edge non-Python tidak dibuat resolver
+    by design, tapi data di-preserve untuk display imports di node card).
 
     ponytail: Go return 2 entries per import (statement + bare path).
     Dedup by lineno — kalau 2 import di line yang sama, keep first.
@@ -154,11 +216,16 @@ def _extract_imports(imports: list[Any]) -> list[ParsedImport]:
         if lineno in seen_lineno:
             continue
         seen_lineno.add(lineno)
-        results.append(ParsedImport(
-            target=imp.source,
-            lineno=lineno,
-            is_star=imp.is_wildcard,
-        ))
+        if language == "python":
+            targets = _normalize_import_source(imp.source, imp.is_wildcard)
+            for t in targets:
+                results.append(ParsedImport(
+                    target=t, lineno=lineno, is_star=imp.is_wildcard,
+                ))
+        else:
+            results.append(ParsedImport(
+                target=imp.source, lineno=lineno, is_star=imp.is_wildcard,
+            ))
     return results
 
 
