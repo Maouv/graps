@@ -265,7 +265,43 @@
     if (!n) return;
     const isDir = n.is_directory || n.type === "directory";
     if (isDir) { toggleFolder(n.id); return; }
-    if (n.supported !== false) setState({ selectedNode: n });
+    if (n.supported !== false) {
+      // Edge visibility: draw() skips edges whose endpoint is hidden. Expanding
+      // the ancestor folders of a node's edge-neighbors makes those neighbors
+      // visible so the import edges/arrows render when the node is selected.
+      expandForSelection(n);
+      setState({ selectedNode: n });
+    }
+  }
+
+  // ponytail: select a node → expand ancestor folders of itself + every edge
+  // neighbor (source or target) so the import edges render. lazy-render §7 #9
+  // keeps edge-draw gated on visible endpoints; this makes them visible.
+  // Collects all ancestor ids first, one setState + one relayout (no N redraws).
+  function expandForSelection(node) {
+    if (!node) return;
+    const current = store.state.graphOpenDirs || new Set();
+    const next = new Set(current);
+    const ids = new Set([node.id]);
+    for (const e of edges) {
+      const s = typeof e.source === "object" ? e.source && e.source.id : e.source;
+      const t = typeof e.target === "object" ? e.target && e.target.id : e.target;
+      if (s === node.id && t) ids.add(t);
+      else if (t === node.id && s) ids.add(s);
+    }
+    let changed = false;
+    ids.forEach(id => {
+      if (!id) return;
+      const parts = id.split("/");
+      for (let i = 1; i < parts.length; i++) {
+        const ancestor = parts.slice(0, i).join("/");
+        if (!next.has(ancestor)) { next.add(ancestor); changed = true; }
+      }
+    });
+    if (changed) {
+      setState({ graphOpenDirs: next });
+      relayout();
+    }
   }
 
   // ── DRAW HELPERS ──────────────────────────────────────────────────────────
@@ -1049,7 +1085,8 @@
       // itu justru kasus yang di-handle: expand ancestor dulu, baru pan.
       const node = nodes.find(n => n.id === ev.detail.id || n.path === ev.detail.id);
       if (!node) return;
-      expandPathTo(node.id);
+      expandPathTo(node.id);        // expand ancestors of the target node itself
+      expandForSelection(node);     // expand ancestors of edge-neighbors → edges render
       panTo(node);
       setState({ selectedNode: node });
     });
