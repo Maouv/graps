@@ -603,7 +603,11 @@
 
       const dx = t.x - s.x, dy = t.y - s.y;
       // Elbow connector: horizontal then vertical (tree style)
-      const midX = s.x + (t.x - s.x) * 0.5;
+      // ponytail: colX(depth) is discrete (depth*290) → dx is exactly 0 (same-column) or a
+      // multiple of 290, never in between. Exact guard, no Math.max/interpolation needed.
+      const midX = dx === 0
+        ? s.x + NODE_W              // same-column: bulge out of the column to clear siblings
+        : s.x + dx * 0.5;           // cross-column: original formula, zero regression
       ctx.beginPath();
       ctx.moveTo(s.x + NODE_W / 2, s.y);          // from right edge of source
       ctx.bezierCurveTo(
