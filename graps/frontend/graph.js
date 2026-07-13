@@ -48,7 +48,7 @@
   const CONNECTOR_COLOR = "oklch(55% 0.12 250)";
 
   const EDGE_COLORS = {
-    imports:       "oklch(52% 0.15 145)",
+    imports:       "oklch(94.38% 0 70.27)",
     circular:      "oklch(58% 0.22 25)",
     function_call: "oklch(55% 0.18 280)",
   };
@@ -612,7 +612,7 @@
         t.x - NODE_W / 2, t.y                      // to left edge of target
       );
       ctx.strokeStyle = color;
-      ctx.lineWidth = 1.5 / k;
+      ctx.lineWidth = 2 / k;
 
       if (edgeType === "circular" || edgeType === "function_call") {
         ctx.setLineDash([5 / k, 4 / k]);
