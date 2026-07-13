@@ -590,7 +590,7 @@
       if (alpha >= 0.18) {
         const tx2 = t.x - NODE_W / 2;
         const ty2 = t.y;
-        drawArrow(tx2, ty2, -1, 0, color, k);
+        drawArrow(tx2, ty2, Math.sign(tx2 - midX) || 1, 0, color, k);
       }
 
       // Circular warning label
