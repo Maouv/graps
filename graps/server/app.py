@@ -42,6 +42,7 @@ if __name__ == "__main__":
 # ponytail: import modul, BUKAN ``from ... import get_provider``. Supaya test
 # (dan integrasi lain) bisa monkeypatch ``provider_module.get_provider`` dan
 # perubahan terlihat di sini juga.
+from graps import storage  # noqa: E402
 from graps.ai import provider as provider_module  # noqa: E402
 from graps.ai.provider import AIError  # noqa: E402
 
@@ -223,6 +224,21 @@ def _language_for_suffix(suffix: str) -> str:
     return _LANGUAGE_FOR_SUFFIX.get(suffix.lower(), "none")
 
 
+def _file_view(graph: dict[str, Any], file_id: str) -> dict[str, Any] | None:
+    """Typed collections → file-centric view (compat for build_ai_context / get_source).
+
+    New schema separates files and functions into typed collections. This adapter
+    reassembles a file node with its functions attached, matching the old shape
+    that ``build_ai_context`` and ``get_source`` expect.
+    """
+    files = (graph.get("nodes") or {}).get("files") or []
+    fnode = next((f for f in files if f.get("id") == file_id), None)
+    if fnode is None:
+        return None
+    fns = (graph.get("nodes") or {}).get("functions") or []
+    return {**fnode, "functions": [f for f in fns if f.get("file_id") == file_id]}
+
+
 def build_ai_context(
     tagged: list[str],
     graph: dict[str, Any],
@@ -244,7 +260,6 @@ def build_ai_context(
     if not tagged or scan_root is None:
         return "", []
 
-    nodes = {n.get("id"): n for n in (graph.get("nodes") or []) if isinstance(n, dict)}
     per_item = max(max_tokens // max(len(tagged), 1), 1)
 
     parts: list[str] = []
@@ -256,7 +271,7 @@ def build_ai_context(
         else:
             rel_path, fn_name = tag, None
 
-        node = nodes.get(rel_path)
+        node = _file_view(graph, rel_path)
         meta_block = ""
         if node is not None:
             if fn_name is not None:
@@ -276,7 +291,10 @@ def build_ai_context(
         # Credential hard-exclude — source tidak dibaca, warning dicatat.
         if _is_credential_file(rel_path):
             warnings.append({"file": rel_path, "reason": "credential_file_excluded"})
-            parts.append(f"[Graph Context]\n{meta_block}\n\n[Source Context]\n<credential file excluded — source not sent>")
+            parts.append(
+                f"[Graph Context]\n{meta_block}\n\n[Source Context]\n"
+                "<credential file excluded — source not sent>"
+            )
             continue
 
         # Baca source dari disk.
@@ -357,12 +375,14 @@ def create_app(
         CORSMiddleware,
         allow_origins=list(allowed) if loopback else ["*"],
         allow_credentials=False,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PUT"],
         allow_headers=["Content-Type"],
     )
 
     @app.middleware("http")
-    async def enforce_origin(request: Request, call_next: Callable[[Request], Awaitable[Any]]) -> Any:
+    async def enforce_origin(
+        request: Request, call_next: Callable[[Request], Awaitable[Any]]
+    ) -> Any:
         """Tolak POST/PUT/DELETE tanpa Origin valid (CSRF guard, BLUEPRINT §11).
 
         Fail-closed: state-mutating methods WAJIB membawa Origin yang sah.
@@ -379,7 +399,9 @@ def create_app(
         return await call_next(request)
 
     @app.middleware("http")
-    async def validate_host(request: Request, call_next: Callable[[Request], Awaitable[Any]]) -> Any:
+    async def validate_host(
+        request: Request, call_next: Callable[[Request], Awaitable[Any]]
+    ) -> Any:
         """DNS rebinding protection — Host header harus localhost/127.0.0.1.
 
         Di-relax (passthrough) saat bind non-loopback.
@@ -427,7 +449,11 @@ def create_app(
         except AIError as e:
             if e.error_type == "sdk_not_installed":
                 return {"enabled": False, "reason": "sdk_not_installed", "warnings": warnings}
-            payload: dict[str, Any] = {"enabled": True, "error_type": e.error_type, "warnings": warnings}
+            payload: dict[str, Any] = {
+                "enabled": True,
+                "error_type": e.error_type,
+                "warnings": warnings,
+            }
             if e.error_type == "rate_limited" and e.retry_after is not None:
                 payload["retry_after"] = e.retry_after
             return payload
@@ -475,11 +501,7 @@ def create_app(
         if fn:
             # Lookup function line_start/line_end dari graph metadata, lalu
             # reuse _extract_function_body (plan.md: jangan duplikat).
-            node = next(
-                (n for n in (graph_data.get("nodes") or [])
-                 if isinstance(n, dict) and n.get("id") == file),
-                None,
-            )
+            node = _file_view(graph_data, file)
             fn_meta = None
             if node is not None:
                 fn_meta = next(
@@ -497,6 +519,87 @@ def create_app(
 
         return {"file": file, "fn": None, "source": raw, "language": language}
 
+    # --- Structural endpoints (FEAT-0016/0017/0018/0020) -------------------
+
+    @app.get("/api/scan/status")
+    def get_scan_status() -> dict[str, Any]:
+        """Return scan metadata (file/function/edge counts, diagnostics)."""
+        return dict(graph_data.get("scan") or {})
+
+    @app.post("/api/scan")
+    def post_scan() -> Any:
+        """Manual rescan — re-discover, re-parse, rebuild graph (FEAT-0015)."""
+        if scan_root is None:
+            return JSONResponse({"error": "scan_root not set"}, status_code=500)
+        # Lazy import to avoid circular dependency (cli imports server.app).
+        from graps.cli import _DEFAULT_EXCLUDES, _discover, _parse_file
+        from graps.scanner.graph_builder import build_graph
+        from graps.scanner.ids import to_posix_rel
+
+        files = _discover(scan_root, set(_DEFAULT_EXCLUDES))
+        results = [r for r in (_parse_file(p, scan_root) for p in files) if r is not None]
+        for r in results:
+            r.id = r.id or to_posix_rel(r.path, scan_root)
+        new_graph = build_graph(results, root=scan_root)
+        # Mutate in-memory graph_data (closure variable).
+        graph_data.clear()
+        graph_data.update(new_graph)
+        # Persist to .graps/.
+        file_rels = [f["id"] for f in new_graph["nodes"]["files"]]
+        storage.write_graph(scan_root, new_graph)
+        storage.write_file_index(scan_root, storage.compute_file_index(scan_root, file_rels))
+        return new_graph.get("scan", {})
+
+    @app.get("/api/settings")
+    def get_settings() -> dict[str, Any]:
+        """Read project-local settings (safe defaults if missing)."""
+        if scan_root is None:
+            return storage.default_settings()
+        return storage.read_settings(scan_root)
+
+    class SettingsUpdate(BaseModel):
+        ai_enrichment: bool | None = None
+        overrides: dict[str, Any] | None = None
+        panel_widths: dict[str, int] | None = None
+        tabs: list[Any] | None = None
+
+    @app.put("/api/settings")
+    def put_settings(req: SettingsUpdate) -> Any:
+        """Update project-local settings (whitelist only, unknown keys dropped)."""
+        if scan_root is None:
+            return JSONResponse({"error": "scan_root not set"}, status_code=500)
+        current = storage.read_settings(scan_root)
+        updates: dict[str, Any] = {}
+        for k in ("ai_enrichment", "overrides", "panel_widths", "tabs"):
+            v = getattr(req, k)
+            if v is not None:
+                updates[k] = v
+        merged = {**current, **updates}
+        return storage.write_settings(scan_root, merged)
+
+    @app.get("/api/modules/{module_id}")
+    def get_module(module_id: str) -> Any:
+        """Module overview — module node + member file/function IDs."""
+        modules = (graph_data.get("nodes") or {}).get("modules") or []
+        mod = next((m for m in modules if m.get("id") == module_id), None)
+        if mod is None:
+            return JSONResponse({"error": "Module not found"}, status_code=404)
+        # Members: files whose module_id matches.
+        files = (graph_data.get("nodes") or {}).get("files") or []
+        fns = (graph_data.get("nodes") or {}).get("functions") or []
+        member_files = [f["id"] for f in files if f.get("module_id") == module_id]
+        member_functions = [f["id"] for f in fns if f.get("module_id") == module_id]
+        return {**mod, "member_files": member_files, "member_functions": member_functions}
+
+    @app.get("/api/flows/{flow_id}")
+    def get_flow(flow_id: str) -> Any:
+        """Flow view — steps for a resolved flow (call_sequence MVP)."""
+        flows = graph_data.get("flows") or []
+        flow = next((f for f in flows if f.get("id") == flow_id), None)
+        if flow is None:
+            return JSONResponse({"error": "Flow not found"}, status_code=404)
+        return flow
+
     return app
 
 
@@ -510,7 +613,12 @@ if __name__ == "__main__":
     PORT = 8765
     HOST_OK = f"127.0.0.1:{PORT}"
     ORIGIN_OK = f"http://127.0.0.1:{PORT}"
-    GRAPH: dict[str, Any] = {"meta": {}, "nodes": [], "edges": [], "warnings": []}
+    GRAPH: dict[str, Any] = {
+        "schema_version": "1.0.0", "scan": {}, "content_hash": "",
+        "nodes": {"files": [], "functions": [], "classes": [], "modules": []},
+        "edges": {"imports": [], "calls": [], "contains": [], "module_depends": []},
+        "flows": [],
+    }
 
     # Save env supaya self-check tidak bocor key dev ke logika "no_api_key".
     saved_env = {
@@ -523,15 +631,23 @@ if __name__ == "__main__":
             scan_root = Path(tmpdir)
             (scan_root / "a.py").write_text("def foo():\n    return 42\n")
             graph = {
-                "meta": {},
-                "nodes": [{
-                    "id": "a.py", "type": "file", "path": "a.py",
-                    "functions": [{"name": "foo", "line_start": 1, "line_end": 2,
-                                    "callers": [], "callees": [], "params": [],
-                                    "returns": None, "risks": []}],
-                    "constants": [], "imports": [], "classes": [], "risks": [],
-                }],
-                "edges": [], "warnings": [],
+                "schema_version": "1.0.0",
+                "scan": {"file_count": 1, "function_count": 1, "edge_count": 0, "diagnostics": []},
+                "content_hash": "",
+                "nodes": {
+                    "files": [{"id": "a.py", "type": "file", "path": "a.py",
+                               "language": "python", "module_id": "a",
+                               "modified_at": "", "constants": [], "exported_names": []}],
+                    "functions": [{"id": "a.py::foo", "type": "function", "file_id": "a.py",
+                                   "module_id": "a", "name": "foo", "qualified_name": "foo",
+                                   "line_start": 1, "line_end": 2, "decorators": [],
+                                   "is_private": False, "is_nested": False,
+                                   "is_property": False, "parent": None}],
+                    "classes": [],
+                    "modules": [],
+                },
+                "edges": {"imports": [], "calls": [], "contains": [], "module_depends": []},
+                "flows": [],
             }
             app = create_app(graph, port=PORT, scan_root=scan_root)
             client = TestClient(app, base_url=f"http://{HOST_OK}")
@@ -550,8 +666,13 @@ if __name__ == "__main__":
             assert "def foo" in j["source"], j
             assert j["language"] == "python", j
             # 1c. valid file + valid fn → function body via _extract_function_body.
-            r = client.get("/api/source", params={"file": "a.py", "fn": "foo"}, headers={"host": HOST_OK})
+            r = client.get(
+                "/api/source",
+                params={"file": "a.py", "fn": "foo"},
+                headers={"host": HOST_OK},
+            )
             assert r.status_code == 200, r.status_code
+
             j = r.json()
             assert j["fn"] == "foo" and "return 42" in j["source"], j
             # 1d. path traversal (..) → 400.
@@ -559,7 +680,11 @@ if __name__ == "__main__":
             assert r.status_code == 400, r.status_code
             assert r.json() == {"error": "Invalid path"}, r.json()
             # 1e. fn not found in graph metadata → 404.
-            r = client.get("/api/source", params={"file": "a.py", "fn": "nope"}, headers={"host": HOST_OK})
+            r = client.get(
+                "/api/source",
+                params={"file": "a.py", "fn": "nope"},
+                headers={"host": HOST_OK},
+            )
             assert r.status_code == 404, r.status_code
             # 1f. missing file on disk → 404.
             r = client.get("/api/source", params={"file": "missing.py"}, headers={"host": HOST_OK})
@@ -588,7 +713,11 @@ if __name__ == "__main__":
             r = client.post("/api/ai/chat", json={"message": "   "},
                             headers={"host": HOST_OK, "origin": ORIGIN_OK})
             assert r.status_code == 200, r.status_code
-            assert r.json() == {"enabled": False, "reason": "empty_message", "warnings": []}, r.json()
+            assert r.json() == {
+                "enabled": False,
+                "reason": "empty_message",
+                "warnings": [],
+            }, r.json()
 
             # 5. /api/ai/chat tanpa API key → no_api_key.
             r = client.post("/api/ai/chat", json={"message": "why?", "tagged": ["a.py"]},

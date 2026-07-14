@@ -96,9 +96,9 @@ class TestBuildEndToEnd:
         )
         graph = _build(tmp_path, set())
         assert "nodes" in graph
-        assert isinstance(graph["nodes"], list)
-        assert len(graph["nodes"]) == 2
-        assert graph["meta"]["total_files"] == 2
+        assert isinstance(graph["nodes"], dict)
+        assert len(graph["nodes"]["files"]) == 2
+        assert graph["scan"]["file_count"] == 2
 
     def test_empty_dir_returns_empty_graph(self, tmp_path: Path) -> None:
         """Dir tanpa file yang didukung → graph kosong (bukan crash).
@@ -109,7 +109,8 @@ class TestBuildEndToEnd:
         """
         (tmp_path / "readme.xyzunknown").write_text("no code here\n")
         graph = _build(tmp_path, set())
-        assert graph.get("nodes", []) == []
+        assert graph["nodes"]["files"] == []
+        assert graph["scan"]["file_count"] == 0
 
     def test_py_fallback_works(self, tmp_path: Path) -> None:
         """Kalau tree-sitter return None untuk .py, ASTParser fallback."""
@@ -117,8 +118,8 @@ class TestBuildEndToEnd:
         # Test ini verify _build tetap menghasilkan graph untuk .py.
         (tmp_path / "solo.py").write_text("def only_func(): pass\n")
         graph = _build(tmp_path, set())
-        assert graph["meta"]["total_files"] == 1
-        assert graph["meta"]["total_functions"] == 1
+        assert graph["scan"]["file_count"] == 1
+        assert graph["scan"]["function_count"] == 1
 
     def test_language_carried_to_parsedfile(self, tmp_path: Path) -> None:
         """_parse_file() carry language field dari TreeSitterParser."""

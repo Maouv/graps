@@ -12,7 +12,6 @@ from fastapi.testclient import TestClient
 from graps.ai.provider import AIError
 from graps.server.app import build_ai_context, create_app
 
-
 # --- fixtures & helpers -------------------------------------------------------
 
 PORT = 8765
@@ -21,49 +20,41 @@ PORT = 8765
 @pytest.fixture()
 def simple_graph():
     return {
-        "meta": {"total_files": 1, "total_functions": 1, "total_edges": 0, "has_warnings": False},
-        "nodes": [
-            {
-                "id": "a.py",
-                "type": "file",
-                "path": "a.py",
-                "risk_level": None,
-                "risk_summary": None,
-                "functions": [
-                    {
-                        "name": "foo",
-                        "type": "function",
-                        "params": [],
-                        "returns": None,
-                        "line_start": 1,
-                        "line_end": None,
-                        "criticality": None,
-                        "callers": [],
-                        "callees": [],
-                        "decorators": [],
-                        "is_private": False,
-                        "is_dead_code": False,
-                        "risks": [],
-                        "ai_summary": None,
-                    }
-                ],
-                "classes": [],
-                "imports": [],
-                "constants": [],
-                "has_all_definition": False,
-                "exported_names": [],
-                "file_modified_at": "2026-01-01T00:00:00",
-                "risks": [],
-            }
-        ],
-        "edges": [],
-        "warnings": [],
+        "schema_version": "1.0.0",
+        "scan": {
+            "file_count": 1,
+            "function_count": 1,
+            "edge_count": 0,
+            "diagnostics": [],
+            "scanned_at": "2026-01-01T00:00:00",
+        },
+        "content_hash": "",
+        "nodes": {
+            "files": [{"id": "a.py", "type": "file", "path": "a.py", "language": "python",
+                       "module_id": "a", "modified_at": "2026-01-01T00:00:00",
+                       "constants": [], "exported_names": []}],
+            "functions": [{"id": "a.py::foo", "type": "function", "file_id": "a.py",
+                           "module_id": "a", "name": "foo", "qualified_name": "foo",
+                           "line_start": 1, "line_end": 2, "decorators": [],
+                           "is_private": False, "is_nested": False,
+                           "is_property": False, "parent": None}],
+            "classes": [],
+            "modules": [],
+        },
+        "edges": {"imports": [], "calls": [], "contains": [], "module_depends": []},
+        "flows": [],
     }
 
 
 @pytest.fixture()
 def ai_body():
-    return {"file": "a.py", "function": "foo", "line": 1, "modified_at": "2026-01-01", "source": "def foo(): pass"}
+    return {
+        "file": "a.py",
+        "function": "foo",
+        "line": 1,
+        "modified_at": "2026-01-01",
+        "source": "def foo(): pass",
+    }
 
 
 def _client(graph_data, tmp_path, port=PORT, scan_root=None):
@@ -87,24 +78,29 @@ def test_get_graph__returns_200_with_schema(simple_graph, tmp_path):
     r = _client(simple_graph, tmp_path).get("/api/graph", headers=_hdr(host=f"127.0.0.1:{PORT}"))
     assert r.status_code == 200
     j = r.json()
-    for k in ("meta", "nodes", "edges", "warnings"):
+    for k in ("schema_version", "scan", "content_hash", "nodes", "edges", "flows"):
         assert k in j
-    assert j["meta"]["total_files"] > 0
+    assert j["scan"]["file_count"] > 0
 
 
-def test_get_graph__nodes_match_section7_schema(simple_graph, tmp_path):
+def test_get_graph__nodes_match_schema(simple_graph, tmp_path):
     r = _client(simple_graph, tmp_path).get("/api/graph", headers=_hdr(host=f"127.0.0.1:{PORT}"))
-    node = r.json()["nodes"][0]
-    for k in ("id", "type", "path", "risk_level", "functions"):
-        assert k in node, f"missing {k}"
-    fn = node["functions"][0]
-    for k in ("name", "params", "returns", "criticality"):
+    files = r.json()["nodes"]["files"]
+    assert files, "files collection not empty"
+    f = files[0]
+    for k in ("id", "type", "path", "language"):
+        assert k in f, f"missing {k}"
+    fns = r.json()["nodes"]["functions"]
+    fn = fns[0]
+    for k in ("name", "qualified_name", "file_id"):
         assert k in fn, f"missing {k}"
 
 
 def test_get_graph__sanitized_constants_phase1_default(simple_graph, tmp_path):
-    node = _client(simple_graph, tmp_path).get("/api/graph", headers=_hdr(host=f"127.0.0.1:{PORT}")).json()["nodes"][0]
-    assert node["constants"] == []
+    files = _client(simple_graph, tmp_path).get(
+        "/api/graph", headers=_hdr(host=f"127.0.0.1:{PORT}")
+    ).json()["nodes"]["files"]
+    assert files[0]["constants"] == []
 
 
 # --- 4-9: security middleware --------------------------------------------------
@@ -174,7 +170,9 @@ def test_security__post_origin_prefix_bypass_rejected_403(simple_graph, tmp_path
 
 def test_security__post_no_origin_rejected_403(simple_graph, tmp_path, ai_body):
     # Fail-closed CSRF guard: no Origin header → 403 (report-bug-finder Finding 2).
-    r = _client(simple_graph, tmp_path).post("/api/ai/summary", json=ai_body, headers=_hdr(host=f"127.0.0.1:{PORT}"))
+    r = _client(simple_graph, tmp_path).post(
+        "/api/ai/summary", json=ai_body, headers=_hdr(host=f"127.0.0.1:{PORT}")
+    )
     assert r.status_code == 403
     assert r.json() == {"error": "Forbidden"}
 
@@ -189,7 +187,9 @@ def test_security__chat_post_invalid_origin_403(simple_graph, tmp_path):
 
 
 def test_security__chat_post_no_origin_rejected_403(simple_graph, tmp_path):
-    r = _client(simple_graph, tmp_path).post("/api/ai/chat", json={"message": "hi"}, headers=_hdr(host=f"127.0.0.1:{PORT}"))
+    r = _client(simple_graph, tmp_path).post(
+        "/api/ai/chat", json={"message": "hi"}, headers=_hdr(host=f"127.0.0.1:{PORT}")
+    )
     assert r.status_code == 403
 
 
@@ -253,7 +253,11 @@ def test_chat__mocked_provider_returns_reply(simple_graph, tmp_path, monkeypatch
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
     r = _client(simple_graph, tmp_path).post(
         "/api/ai/chat",
-        json={"message": "why foo?", "tagged": [], "history": [{"role": "assistant", "content": "hi"}]},
+        json={
+            "message": "why foo?",
+            "tagged": [],
+            "history": [{"role": "assistant", "content": "hi"}],
+        },
         headers=_hdr(host=f"127.0.0.1:{PORT}", origin=f"http://127.0.0.1:{PORT}"),
     )
     j = r.json()
@@ -321,16 +325,16 @@ def test_chat__sdk_not_installed_returns_disabled(simple_graph, tmp_path, monkey
 def test_chat__build_context_with_scan_root(simple_graph, tmp_path, monkeypatch):
     # Tulis source asli ke scan_root (tmp_path) supaya build_ai_context baca disk.
     (tmp_path / "a.py").write_text("def foo():\n    return 42\n\ndef bar(): pass\n")
-    # Update graph dengan line_end supaya function body di-extract presisi.
+    # Update function dengan line_start/line_end supaya function body di-extract presisi.
     graph = {
         **simple_graph,
-        "nodes": [{
-            **simple_graph["nodes"][0],
+        "nodes": {
+            **simple_graph["nodes"],
             "functions": [{
-                **simple_graph["nodes"][0]["functions"][0],
+                **simple_graph["nodes"]["functions"][0],
                 "line_start": 1, "line_end": 2,
             }],
-        }],
+        },
     }
     captured = {}
 

@@ -28,14 +28,16 @@ if __name__ == "__main__":
     import sys as _sys
     _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from graps import __version__  # noqa: E402
+from graps import (
+    __version__,  # noqa: E402
+    storage,  # noqa: E402
+)
 from graps.scanner import ParsedFile  # noqa: E402
 from graps.scanner.ast_parser import safe_parse
 from graps.scanner.graph_builder import build_graph
 from graps.scanner.ids import to_posix_rel
 from graps.scanner.tree_sitter_parser import TreeSitterParser  # Phase 4
 from graps.server.app import create_app  # noqa: E402
-from graps import storage  # noqa: E402
 
 app = typer.Typer(add_completion=False)
 
@@ -177,7 +179,11 @@ def _warn_if_cache_not_ignored(root: Path) -> None:
 def main(
     path: str = typer.Argument(".", help="Directory to be scanned"),
     port: int = typer.Option(8765, "--port", help="Port HTTP server"),
-    host: str = typer.Option("127.0.0.1", "--host", help="Network address to bind (default 127.0.0.1; 0.0.0.0 to expose on LAN/VPS)"),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="Network address to bind (default 127.0.0.1; 0.0.0.0 to expose on LAN/VPS)",
+    ),
     no_browser: bool = typer.Option(False, "--no-browser", help="Not auto open brower"),
     no_cache: bool = typer.Option(False, "--no-cache", help="Cache deleted (deletee by OS)"),
     exclude: list[str] = typer.Option(  # noqa: B008
@@ -223,18 +229,18 @@ def main(
     results = [r for r in (_parse_file(p, root) for p in files) if r is not None]
     graph = build_graph(results, root=root)
 
-    meta = graph.get("meta", {})
-    files_n = meta.get("total_files", len(results))
-    funcs_n = meta.get("total_functions", sum(len(r.functions) for r in results))
-    edges_n = meta.get("total_edges", len(graph.get("edges", [])))
-    risks = _count_risks(graph)
+    scan = graph.get("scan", {})
+    files_n = scan.get("file_count", len(results))
+    funcs_n = scan.get("function_count", sum(len(r.functions) for r in results))
+    edges_n = scan.get("edge_count", 0)
+    diag = _count_diagnostics(graph)
 
     typer.echo(f"  ├── Found {files_n} files")
     typer.echo(f"  ├── Found {funcs_n} functions")
     typer.echo(f"  ├── Found {edges_n} import relationships")
     typer.echo(
-        f"  └── Risk analysis complete: {risks['high']} high, "
-        f"{risks['medium']} medium, {risks['low']} low"
+        f"  └── Diagnostics: {diag['error']} errors, "
+        f"{diag['warning']} warnings"
     )
     # edge-resolution-bug: silent-failure guard. Kalau repo Python >= 5 file
     # punya import tapi 0 edge, kemungkinan adapter/resolver format drift lagi
@@ -248,6 +254,11 @@ def main(
                 "possible resolver/adapter issue (target format drift)"
             )
     typer.echo("")
+
+    # FEAT-0020: persist graph + file index to .graps/ (atomic, schema-versioned).
+    file_rels = [f["id"] for f in graph["nodes"]["files"]]
+    storage.write_graph(root, graph)
+    storage.write_file_index(root, storage.compute_file_index(root, file_rels))
 
     # AI provider env masking. get_provider order Anthropic-first → ini cara
     # paling lazy untuk memaksa openai.
@@ -333,9 +344,10 @@ if __name__ == "__main__":
         assert len(files) == 1, files  # __pycache__ ter-skip
 
         graph = _build(tdp, set(_DEFAULT_EXCLUDES))
-        assert "nodes" in graph and isinstance(graph["nodes"], list), graph
-        assert graph["meta"]["total_files"] == 1, graph["meta"]
-        assert graph["meta"]["total_functions"] == 1, graph["meta"]
+        assert "nodes" in graph and isinstance(graph["nodes"], dict), graph
+        assert graph["scan"]["file_count"] == 1, graph["scan"]
+        assert graph["scan"]["function_count"] == 1, graph["scan"]
+        assert ".graps" not in {f["id"] for f in graph["nodes"]["files"]}
 
     # 4. Empty dir → exit code != 0.
     with tempfile.TemporaryDirectory() as td:
@@ -347,12 +359,15 @@ if __name__ == "__main__":
     r = runner.invoke(app, ["/path/yang/pasti/tidak/ada/xyz123", "--no-browser"])
     assert r.exit_code != 0, (r.exit_code, r.output)
 
-    # 6. _count_risks tahan input kosong / None.
-    assert _count_risks({"nodes": []}) == {"high": 0, "medium": 0, "low": 0}
-    assert _count_risks({"nodes": [{"risks": None}]}) == {"high": 0, "medium": 0, "low": 0}
-    assert _count_risks(
-        {"nodes": [{"risks": [{"severity": "high"}, {"level": "MEDIUM"}]}]}
-    ) == {"high": 1, "medium": 1, "low": 0}
+    # 6. _count_diagnostics tahan input kosong / None.
+    assert _count_diagnostics({}) == {"error": 0, "warning": 0}
+    assert _count_diagnostics({"scan": {}}) == {"error": 0, "warning": 0}
+    assert _count_diagnostics({"scan": {"diagnostics": None}}) == {"error": 0, "warning": 0}
+    assert _count_diagnostics(
+        {"scan": {"diagnostics": [
+            {"level": "error"}, {"level": "warning"}, {"level": "WARNING"},
+        ]}}
+    ) == {"error": 1, "warning": 2}
 
     # 7. _port_free konsisten dengan socket-bind manual.
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -360,5 +375,16 @@ if __name__ == "__main__":
     busy_port = s.getsockname()[1]
     assert _port_free(busy_port) is False
     s.close()
+
+    # 8. Storage: write_graph + read_graph reusable, .graps not a node.
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        (tdp / "a.py").write_text("def foo(): pass\n")
+        graph = _build(tdp, set(_DEFAULT_EXCLUDES))
+        storage.write_graph(tdp, graph)
+        reloaded = storage.read_graph(tdp)
+        assert reloaded is not None
+        assert reloaded["content_hash"] == graph["content_hash"]
+        assert ".graps" not in {f["id"] for f in reloaded["nodes"]["files"]}
 
     print("cli.py self-check OK")

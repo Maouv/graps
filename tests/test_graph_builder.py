@@ -1,22 +1,18 @@
-"""Unit tests for graph_builder.build_graph (BLUEPRINT §7, §13).
+"""Unit tests for graph_builder.build_graph — schema v1.0.0 (FEAT-0017).
 
-Phase 1 limitation: parser does not extract constants/params/returns/classes/etc.
-Schema fields with no upstream data get defaults — tests assert those defaults.
-Sanitize wiring (C-01) is tested via _sanitized_constants helper directly.
+Tests the typed collections (files/functions/classes/modules), typed edges
+(imports/calls/contains/module_depends), flows, scan diagnostics, content_hash
+determinism, and C-01 constant redaction.
 """
 
 from datetime import datetime
-from pathlib import Path
 
 import pytest
 
 from graps.scanner import ParsedFile
 from graps.scanner.ast_parser import safe_parse
-from graps.scanner.graph_builder import build_graph, _sanitized_constants
+from graps.scanner.graph_builder import _sanitized_constants, build_graph
 from graps.scanner.tree_sitter_parser import TreeSitterParser
-
-# tree-sitter-language-pack opsional. Test ``test_build_graph__edge_via_tree_sitter``
-# di-skip inline kalau absent; test lain pakai ast_parser dan tetap jalan.
 
 
 def _make_project(tmp_path):
@@ -34,48 +30,44 @@ def _make_project(tmp_path):
 def test_build_graph__returns_schema_keys(tmp_path):
     root, results = _make_project(tmp_path)
     g = build_graph(results, root)
-    assert set(g.keys()) == {"meta", "nodes", "edges", "warnings"}
+    assert set(g.keys()) == {"schema_version", "scan", "content_hash", "nodes", "edges", "flows"}
 
 
-def test_build_graph__meta_counts_correct(tmp_path):
+def test_build_graph__scan_counts_correct(tmp_path):
     root, results = _make_project(tmp_path)
-    m = build_graph(results, root)["meta"]
-    assert m["total_files"] == 4
-    assert m["total_functions"] == 1
-    assert m["total_edges"] >= 1
+    s = build_graph(results, root)["scan"]
+    assert s["file_count"] == 4
+    assert s["function_count"] == 1
+    assert s["edge_count"] >= 1
 
 
-def test_build_graph__meta_has_scanned_at(tmp_path):
+def test_build_graph__scan_has_scanned_at(tmp_path):
     root, results = _make_project(tmp_path)
-    m = build_graph(results, root)["meta"]
-    datetime.fromisoformat(m["scanned_at"])  # raises if not ISO-8601
+    s = build_graph(results, root)["scan"]
+    datetime.fromisoformat(s["scanned_at"])  # raises if not ISO-8601
 
 
-def test_build_graph__node_has_id_relative_to_root(tmp_path):
+def test_build_graph__file_node_id_relative_to_root(tmp_path):
     root, results = _make_project(tmp_path)
-    nodes = {n["id"]: n for n in build_graph(results, root)["nodes"]}
-    assert "services/helper.py" in nodes
-    assert not any(n["id"].startswith("/") for n in nodes.values()), "M-03: absolute path leak"
+    files = {f["id"]: f for f in build_graph(results, root)["nodes"]["files"]}
+    assert "services/helper.py" in files
+    assert not any(f["id"].startswith("/") for f in files.values()), "M-03: absolute path leak"
 
 
-def test_build_graph__node_function_shape(tmp_path):
+def test_build_graph__function_shape(tmp_path):
     root, results = _make_project(tmp_path)
-    nodes = {n["id"]: n for n in build_graph(results, root)["nodes"]}
-    fns = nodes["services/helper.py"]["functions"]
-    hello = fns[0]
-    assert hello["name"] == "hello"
+    fns = build_graph(results, root)["nodes"]["functions"]
+    hello = next(f for f in fns if f["name"] == "hello")
     assert hello["type"] == "function"
+    assert hello["file_id"] == "services/helper.py"
+    assert hello["qualified_name"] == "helper.hello"
     assert hello["decorators"] == []
     assert hello["is_private"] is False
     assert isinstance(hello["line_start"], int)
-    assert hello["params"] == []
-    assert hello["returns"] is None
-    assert hello["line_end"] is None
-    assert hello["callers"] == []
-    assert hello["callees"] == []
-    assert hello["is_dead_code"] is False
-    assert hello["risks"] == []
-    assert hello["ai_summary"] is None
+    assert isinstance(hello["line_end"], int)
+    assert hello["is_nested"] is False
+    assert hello["is_property"] is False
+    assert hello["parent"] is None
 
 
 def test_build_graph__private_function_detected(tmp_path):
@@ -83,32 +75,26 @@ def test_build_graph__private_function_detected(tmp_path):
     root.mkdir()
     (root / "priv.py").write_text("def _hidden(): pass\n")
     results = [safe_parse(p) for p in root.rglob("*.py")]
-    fns = build_graph(results, root)["nodes"][0]["functions"]
+    fns = build_graph(results, root)["nodes"]["functions"]
     assert fns[0]["is_private"] is True
 
 
-def test_build_graph__edge_shape(tmp_path):
+def test_build_graph__import_edge_shape(tmp_path):
     root, results = _make_project(tmp_path)
-    edges = build_graph(results, root)["edges"]
-    assert len(edges) >= 1
-    e = edges[0]
+    imports = build_graph(results, root)["edges"]["imports"]
+    assert len(imports) >= 1
+    e = imports[0]
     assert "source" in e and "target" in e
-    assert e["type"] == "imports"
-    assert e["weight"] >= 1
-    assert isinstance(e["imported_names"], list)
-    assert not e["source"].startswith("/") and not e["target"].startswith("/")
+    assert e["kind"] == "imports"
+    assert isinstance(e["order"], int)
+    assert isinstance(e["imported_name"], str)
+    assert not e["source"].startswith("/")
 
 
 def test_build_graph__edge_via_tree_sitter(tmp_path):
-    """edge-resolution-bug end-to-end guard: parse fixture via TreeSitterParser
-    (bukan synthetic ParsedFile), build_graph, assert edge ter-buat.
-
-    Sebelum adapter fix: TreeSitterParser isi ``target`` dengan raw statement
-    text (``"from .sub import helper"``) → resolver None → 0 edge. Setelah fix:
-    ``target = ".sub.helper"`` → resolve ke ``sub.py`` → edge ter-buat."""
-    # Skip kalau tree-sitter-language-pack absent (test lain pakai ast_parser).
+    """edge-resolution-bug end-to-end guard: parse fixture via TreeSitterParser,
+    build_graph, assert import edge ter-buat."""
     pytest.importorskip("tree_sitter_language_pack", reason="tslp not installed")
-    # Build a minimal relative-import project under tmp_path.
     pkg = tmp_path / "relpkg"
     pkg.mkdir()
     (pkg / "__init__.py").write_text("")
@@ -121,45 +107,45 @@ def test_build_graph__edge_via_tree_sitter(tmp_path):
     results = [r for r in results if r is not None]
 
     g = build_graph(results, tmp_path)
-    edges = g["edges"]
-    assert len(edges) >= 1, (
-        f"expected >= 1 edge via tree-sitter path, got 0 (adapter raw-statement "
-        f"bug regression); imports={[i.target for r in results for i in r.imports]}"
+    imports = g["edges"]["imports"]
+    assert len(imports) >= 1, (
+        f"expected >= 1 import edge via tree-sitter, got 0; "
+        f"imports={[i.target for r in results for i in r.imports]}"
     )
-    # Edge main.py → sub.py harus ada (relative import resolved).
-    pairs = {(e["source"], e["target"]) for e in edges}
+    pairs = {(e["source"], e["target"]) for e in imports if e["target"]}
     assert ("relpkg/main.py", "relpkg/sub.py") in pairs, \
         f"edge relpkg/main.py → relpkg/sub.py missing; got {pairs}"
 
 
-def test_build_graph__star_import_emits_warning_no_edge(tmp_path):
+def test_build_graph__star_import_no_resolved_edge(tmp_path):
     root, results = _make_project(tmp_path)
-    g = build_graph(results, root)
-    star_srcs = {e["source"] for e in g["edges"]}
-    assert "star.py" not in star_srcs
-    star_warns = [w for w in g["warnings"] if w["type"] == "star_import"]
-    assert any(w["file"] == "star.py" for w in star_warns)
+    imports = build_graph(results, root)["edges"]["imports"]
+    star_edges = [e for e in imports if e["source"] == "star.py"]
+    # Star import → unresolved (target None), but edge still emitted.
+    assert all(e["target"] is None for e in star_edges)
+    assert all(e["unresolved_reason"] == "star_import" for e in star_edges)
+    # Diagnostic for star import.
+    diags = build_graph(results, root)["scan"]["diagnostics"]
+    assert any(d["file"] == "star.py" and d["code"] == "star_import" for d in diags)
 
 
 def test_build_graph__constants_default_empty(tmp_path):
     root, results = _make_project(tmp_path)
-    nodes = build_graph(results, root)["nodes"]
-    assert all(n["constants"] == [] for n in nodes)
-    # ponytail: Phase 2 — saat parser ekstrak constants, ganti test ini ke assert constants ter-extract
+    files = build_graph(results, root)["nodes"]["files"]
+    assert all(f["constants"] == [] for f in files)
 
 
 def test_build_graph__constants_flow_through_and_redact(tmp_path):
-    # Finding 1 regression: ParsedFile.constants must reach graph output via C-01.
     pf = ParsedFile(
         id="cfg.py", path=tmp_path / "cfg.py",
         constants=[{"name": "MAX_RETRY", "value": "3", "line": 1},
                    {"name": "DB_PASSWORD", "value": "hunter2", "line": 2}],
     )
-    node = build_graph([pf], tmp_path)["nodes"][0]
-    assert node["constants"] == [
+    files = build_graph([pf], tmp_path)["nodes"]["files"]
+    assert files[0]["constants"] == [
         {"name": "MAX_RETRY", "value": "3", "line": 1},
         {"name": "DB_PASSWORD", "value": "[REDACTED]", "line": 2},
-    ], node["constants"]
+    ], files[0]["constants"]
 
 
 def test_sanitized_constants__redacts_db_password():
@@ -173,18 +159,28 @@ def test_sanitized_constants__preserves_safe_constant():
 
 
 def test_sanitized_constants__redacts_api_key_pattern():
-    out = _sanitized_constants([{"name": "FOO", "value": "sk-ant-abc123def456ghi789jkl012mno345", "line": 1}])
+    # Value must match sk-ant-[a-zA-Z0-9\-_]{20,} (20+ alnum chars after sk-ant-).
+    out = _sanitized_constants([{"name": "FOO", "value": "sk-ant-" + "a" * 25, "line": 1}])
     assert out[0]["value"] == "[REDACTED]"
 
 
-def test_build_graph__risk_level_default_none(tmp_path):
+def test_build_graph__content_hash_deterministic(tmp_path):
     root, results = _make_project(tmp_path)
-    nodes = build_graph(results, root)["nodes"]
-    assert all(n["risk_level"] is None for n in nodes)
+    g1 = build_graph(results, root)
+    g2 = build_graph(list(results), root)
+    assert g1["content_hash"] == g2["content_hash"], "hash must be stable"
+    assert g1["scan"]["scanned_at"] != g2["scan"]["scanned_at"]
 
 
-def test_build_graph__risks_list_contains_star_import(tmp_path):
+def test_build_graph__no_absolute_path_leak(tmp_path):
+    import json
     root, results = _make_project(tmp_path)
-    nodes = {n["id"]: n for n in build_graph(results, root)["nodes"]}
-    star_risks = nodes["star.py"]["risks"]
-    assert any(r["type"] == "star_import" and r["severity"] == "medium" for r in star_risks)
+    g = build_graph(results, root)
+    blob = json.dumps(g, sort_keys=True)
+    assert root.resolve().as_posix() not in blob, "absolute path leaked"
+
+
+def test_build_graph__graps_excluded_by_default():
+    """FEAT-0020: .graps/ in _DEFAULT_EXCLUDES (scanner filter, bukan graph_builder)."""
+    from graps.cli import _DEFAULT_EXCLUDES
+    assert ".graps" in _DEFAULT_EXCLUDES
