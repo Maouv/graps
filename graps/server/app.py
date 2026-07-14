@@ -30,6 +30,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # ponytail: dipanggil sebagai `python graps/server/app.py` (self-check) butuh
@@ -49,6 +50,7 @@ from graps.ai.provider import AIError  # noqa: E402
 logger = logging.getLogger(__name__)
 
 DEFAULT_CACHE_PATH: Path = Path.cwd() / ".graps" / "cache.json"
+FRONTEND_DIR: Path = Path(__file__).parent.parent / "frontend"
 
 
 class SummaryRequest(BaseModel):
@@ -599,6 +601,10 @@ def create_app(
         if flow is None:
             return JSONResponse({"error": "Flow not found"}, status_code=404)
         return flow
+
+    # Static mount must remain last so it cannot shadow /api routes.
+    if FRONTEND_DIR.is_dir():
+        app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
 
     return app
 
