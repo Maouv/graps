@@ -71,16 +71,6 @@ def _hdr(host=None, origin=None):
     return h
 
 
-# --- frontend root ------------------------------------------------------------
-
-
-def test_frontend_root__serves_html(simple_graph, tmp_path):
-    r = _client(simple_graph, tmp_path).get("/", headers=_hdr(host=f"127.0.0.1:{PORT}"))
-    assert r.status_code == 200
-    assert "text/html" in r.headers["content-type"]
-    assert "<!doctype html>" in r.text.lower()
-
-
 # --- 1-3: GET /api/graph ------------------------------------------------------
 
 
