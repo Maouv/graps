@@ -129,9 +129,9 @@ related: []
 - Preserve structural-first, no-AI fallback, source-security, and responsive/accessibility invariants where applicable.
 
 ### Acceptance Criteria
-- [ ] Graph has a schema version and deterministic ordering.
-- [ ] Source ranges and parser diagnostics are retained.
-- [ ] Unknown dynamic relations remain unresolved with reason/confidence.
+- [x] Graph has a schema version and deterministic ordering.
+- [x] Source ranges and parser diagnostics are retained.
+- [x] Unknown dynamic relations remain unresolved with reason/confidence.
 - [ ] AI cannot mutate graph nodes or edges.
 
 ## 3. Design
@@ -179,7 +179,7 @@ related: []
 ### Validation Checklist
 
 - [ ] Targeted unit/API/UI tests pass.
-- [ ] `git diff --check` passes.
+- [x] `git diff --check` passes.
 - [ ] Failure fallback is exercised.
 
 ### Review Checklist
@@ -193,9 +193,9 @@ related: []
 
 ### Acceptance Checklist
 
-- [ ] Graph has a schema version and deterministic ordering.
-- [ ] Source ranges and parser diagnostics are retained.
-- [ ] Unknown dynamic relations remain unresolved with reason/confidence.
+- [x] Graph has a schema version and deterministic ordering.
+- [x] Source ranges and parser diagnostics are retained.
+- [x] Unknown dynamic relations remain unresolved with reason/confidence.
 - [ ] AI cannot mutate graph nodes or edges.
 
 ### User Testing Result

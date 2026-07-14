@@ -129,7 +129,7 @@ related: []
 - Preserve structural-first, no-AI fallback, source-security, and responsive/accessibility invariants where applicable.
 
 ### Acceptance Criteria
-- [ ] Writes use complete temporary data and atomic replacement.
+- [x] Writes use complete temporary data and atomic replacement.
 - [ ] Architecture hash must match graph hash before rendering.
 - [ ] Changed files only invalidate affected structural modules.
 - [ ] Cache contains no provider secret or absolute host path.
@@ -179,7 +179,7 @@ related: []
 ### Validation Checklist
 
 - [ ] Targeted unit/API/UI tests pass.
-- [ ] `git diff --check` passes.
+- [x] `git diff --check` passes.
 - [ ] Failure fallback is exercised.
 
 ### Review Checklist
@@ -193,7 +193,7 @@ related: []
 
 ### Acceptance Checklist
 
-- [ ] Writes use complete temporary data and atomic replacement.
+- [x] Writes use complete temporary data and atomic replacement.
 - [ ] Architecture hash must match graph hash before rendering.
 - [ ] Changed files only invalidate affected structural modules.
 - [ ] Cache contains no provider secret or absolute host path.

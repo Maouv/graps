@@ -130,7 +130,7 @@ related: []
 
 ### Acceptance Criteria
 - [ ] Java/Kotlin, Go, Python, JS/TS, and Rust precedence follows the architecture contract.
-- [ ] Fallback boundaries carry explicit confidence.
+- [x] Fallback boundaries carry explicit confidence.
 - [ ] AI may rename, summarize, merge-view, or suggest groups only.
 - [ ] Original structural modules remain navigable.
 
@@ -179,7 +179,7 @@ related: []
 ### Validation Checklist
 
 - [ ] Targeted unit/API/UI tests pass.
-- [ ] `git diff --check` passes.
+- [x] `git diff --check` passes.
 - [ ] Failure fallback is exercised.
 
 ### Review Checklist
@@ -194,7 +194,7 @@ related: []
 ### Acceptance Checklist
 
 - [ ] Java/Kotlin, Go, Python, JS/TS, and Rust precedence follows the architecture contract.
-- [ ] Fallback boundaries carry explicit confidence.
+- [x] Fallback boundaries carry explicit confidence.
 - [ ] AI may rename, summarize, merge-view, or suggest groups only.
 - [ ] Original structural modules remain navigable.
 

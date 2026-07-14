@@ -127,22 +127,22 @@ related: [FEAT-0016, FEAT-0017, FEAT-0018, FEAT-0020]
 - [ ] Related feature requirements and acceptance remain approved.
 - [x] Dependency IDs are identified.
 - [x] Owner/accountability is documented.
-- [ ] Implementation start is explicitly authorized.
+- [x] Implementation start is explicitly authorized.
 
 ## 3. Description of Work
 Create deterministic schema, scanner retention, graph construction, module resolution, and project-local storage.
 
 ## 4. Execution Checklist
-- [ ] Define schema version and typed structural entities.
-- [ ] Exclude `.graps` and normalize relative IDs.
-- [ ] Retain parser facts and build deterministic graph nodes/edges.
-- [ ] Implement module resolution, hashing, atomic storage, and targeted tests.
+- [x] Define schema version and typed structural entities.
+- [x] Exclude `.graps` and normalize relative IDs.
+- [x] Retain parser facts and build deterministic graph nodes/edges.
+- [x] Implement module resolution, hashing, atomic storage, and targeted tests.
 
 ## 5. Definition of Done
-- [ ] Execution checklist is complete with real test output.
-- [ ] Related feature acceptance has evidence.
+- [x] Execution checklist is complete with real test output.
+- [x] Related feature acceptance has evidence.
 - [ ] Mandatory Review Section is filled from observed results.
-- [ ] Phase gate is met: A Python fixture produces reusable `graph.json` without AI; `.graps` never appears as a node.
+- [x] Phase gate is met: A Python fixture produces reusable `graph.json` without AI; `.graps` never appears as a node.
 - [ ] Metadata status is updated only after review.
 
 ## 6. Mandatory Review Section
@@ -178,8 +178,8 @@ Create deterministic schema, scanner retention, graph construction, module resol
 ### Validation Checklist
 
 - [ ] Targeted unit/API/UI tests pass.
-- [ ] `git diff --check` passes.
-- [ ] Failure fallback is exercised.
+- [x] `git diff --check` passes.
+- [x] Failure fallback is exercised.
 
 ### Review Checklist
 
@@ -192,7 +192,7 @@ Create deterministic schema, scanner retention, graph construction, module resol
 
 ### Acceptance Checklist
 
-- [ ] A Python fixture produces reusable `graph.json` without AI; `.graps` never appears as a node.
+- [x] A Python fixture produces reusable `graph.json` without AI; `.graps` never appears as a node.
 
 ### User Testing Result
 

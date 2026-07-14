@@ -129,10 +129,10 @@ related: []
 - Preserve structural-first, no-AI fallback, source-security, and responsive/accessibility invariants where applicable.
 
 ### Acceptance Criteria
-- [ ] Project opening initiates structural readiness.
-- [ ] `.graps`, VCS, dependencies, builds, binaries, and credential rules are excluded.
-- [ ] One malformed source file yields diagnostics without aborting the project.
-- [ ] Serialized IDs are scan-root-relative and stable.
+- [x] Project opening initiates structural readiness.
+- [x] `.graps`, VCS, dependencies, builds, binaries, and credential rules are excluded.
+- [x] One malformed source file yields diagnostics without aborting the project.
+- [x] Serialized IDs are scan-root-relative and stable.
 
 ## 3. Design
 - Follow `../04-design-architecture/design.md`; do not redefine shared interaction behavior here.
@@ -179,7 +179,7 @@ related: []
 ### Validation Checklist
 
 - [ ] Targeted unit/API/UI tests pass.
-- [ ] `git diff --check` passes.
+- [x] `git diff --check` passes.
 - [ ] Failure fallback is exercised.
 
 ### Review Checklist
@@ -193,10 +193,10 @@ related: []
 
 ### Acceptance Checklist
 
-- [ ] Project opening initiates structural readiness.
-- [ ] `.graps`, VCS, dependencies, builds, binaries, and credential rules are excluded.
-- [ ] One malformed source file yields diagnostics without aborting the project.
-- [ ] Serialized IDs are scan-root-relative and stable.
+- [x] Project opening initiates structural readiness.
+- [x] `.graps`, VCS, dependencies, builds, binaries, and credential rules are excluded.
+- [x] One malformed source file yields diagnostics without aborting the project.
+- [x] Serialized IDs are scan-root-relative and stable.
 
 ### User Testing Result
 
