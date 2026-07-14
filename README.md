@@ -26,4 +26,4 @@ Open `http://localhost:8765` in your browser.
 
 MIT — see [LICENSE](LICENSE).
 
-> **Experimental branch:** Branch ini digunakan untuk pengembangan dan pengujian fitur eksperimental.
+> **Note:** This branch is for experimental features.
