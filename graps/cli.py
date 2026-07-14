@@ -32,14 +32,42 @@ from graps import __version__  # noqa: E402
 from graps.scanner import ParsedFile  # noqa: E402
 from graps.scanner.ast_parser import safe_parse
 from graps.scanner.graph_builder import build_graph
+from graps.scanner.ids import to_posix_rel
 from graps.scanner.tree_sitter_parser import TreeSitterParser  # Phase 4
 from graps.server.app import create_app  # noqa: E402
+from graps import storage  # noqa: E402
 
 app = typer.Typer(add_completion=False)
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_EXCLUDES = ("__pycache__", ".git", ".venv", "venv", "node_modules")
+# FEAT-0016: exclude .graps, VCS, dependencies, build dirs, and credential/binary
+# files from scanning. Dirs are matched by name on any path segment; credential
+# and binary files are filtered by name/extension in _discover.
+_DEFAULT_EXCLUDES = (
+    "__pycache__", ".graps",
+    ".git", ".hg", ".svn", ".idea", ".vscode",
+    ".venv", "venv", "env", "site-packages", ".tox", ".eggs",
+    "node_modules", "bower_components", "jspm_packages",
+    "dist", "build", "target", "out", "egg-info",
+    ".mypy_cache", ".ruff_cache", ".pytest_cache", ".impeccable",
+)
+_CREDENTIAL_FILE_NAMES = {
+    ".env", ".env.local", ".env.production", ".env.development", ".env.staging",
+    "credentials.json", "secrets.json", "secret.json",
+    "id_rsa", "id_ecdsa", "id_ed25519",
+}
+_CREDENTIAL_FILE_EXTS = {".pem", ".key", ".p12", ".pfx"}
+_BINARY_FILE_EXTS = {".so", ".pyc", ".pyo", ".dylib", ".dll", ".exe", ".bin", ".o", ".a", ".wasm"}
+
+
+def _is_excluded_file(rel_path: Path) -> bool:
+    """Hard-exclude credential and binary files (FEAT-0016 / security)."""
+    name = rel_path.name.lower()
+    if name in _CREDENTIAL_FILE_NAMES:
+        return True
+    ext = rel_path.suffix.lower()
+    return ext in _CREDENTIAL_FILE_EXTS or ext in _BINARY_FILE_EXTS
 
 
 def _discover(path: Path, exclude: set[str]) -> list[Path]:
@@ -58,6 +86,8 @@ def _discover(path: Path, exclude: set[str]) -> list[Path]:
         if not p.is_file():
             continue
         if set(p.parts) & exclude:
+            continue
+        if _is_excluded_file(p):
             continue
         if use_tslp:
             if detect_language_from_path(str(p)) is not None:
@@ -90,17 +120,18 @@ def _build(path: Path, exclude: set[str]) -> dict[str, Any]:
     """Discover + parse + build_graph. Dipisah supaya self-check bisa panggil tanpa server."""
     files = _discover(path, exclude)
     results = [r for r in (_parse_file(p, path) for p in files) if r is not None]
+    for r in results:
+        r.id = r.id or to_posix_rel(r.path, path)
     return build_graph(results, root=path)
 
 
-def _count_risks(graph: dict[str, Any]) -> dict[str, int]:
-    """Hitung risk per criticality dari graph (file-level risks)."""
-    counts = {"high": 0, "medium": 0, "low": 0}
-    for node in graph.get("nodes", []):
-        for r in node.get("risks", []) or []:
-            sev = (r.get("severity") or r.get("level") or "").lower()
-            if sev in counts:
-                counts[sev] += 1
+def _count_diagnostics(graph: dict[str, Any]) -> dict[str, int]:
+    """Count scan diagnostics by level (FEAT-0017: risks/warnings live in scan.diagnostics)."""
+    counts = {"error": 0, "warning": 0}
+    for d in graph.get("scan", {}).get("diagnostics", []) or []:
+        level = str(d.get("level", "warning")).lower()
+        if level in counts:
+            counts[level] += 1
     return counts
 
 

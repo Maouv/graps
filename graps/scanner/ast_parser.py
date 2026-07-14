@@ -8,7 +8,7 @@ import threading
 import tokenize
 from pathlib import Path
 
-from graps.scanner import ParsedFile, ParsedFunction, ParsedImport, ParseResult
+from graps.scanner import ParsedCall, ParsedFile, ParsedFunction, ParsedImport, ParseResult
 
 _MAX_BYTES = 1_000_000  # 1MB (Section 14)
 _TIMEOUT_S = 5          # Section 14
@@ -19,7 +19,7 @@ _TIMEOUT_S = 5          # Section 14
 # carriers may be re-exported.
 __all__ = [
     "safe_parse", "ASTParser",
-    "ParsedFile", "ParsedFunction", "ParsedImport", "ParseResult",
+    "ParsedFile", "ParsedFunction", "ParsedImport", "ParsedCall", "ParseResult",
 ]
 
 
@@ -113,8 +113,12 @@ class _ScannerVisitor(ast.NodeVisitor):
         self._scope: list[str] = [module_name]      # qualified-name components
         self._kind: list[str] = ["module"]           # parallel: module/class/func
         self._in_try = 0                             # try-body depth (Section 14)
+        # FEAT-0017: per-function direct static call sites (source order).
+        # Top of stack = current enclosing function's call list; empty at module scope.
+        self._call_stacks: list[list[ParsedCall]] = []
         self.functions: list[ParsedFunction] = []
         self.imports: list[ParsedImport] = []
+        self.classes: list[dict[str, object]] = []
         self.exported_names: list[str] = []
         self.warnings: list[str] = []
 
@@ -123,18 +127,29 @@ class _ScannerVisitor(ast.NodeVisitor):
 
     def _handle_func(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         is_nested = "func" in self._kind  # an enclosing function exists
-        self.functions.append(ParsedFunction(
+        end_line = getattr(node, "end_lineno", None) or node.lineno
+        pf = ParsedFunction(
             name=node.name,
             qualified_name=self._qual(node.name),
             lineno=node.lineno,
+            line_start=node.lineno,
+            line_end=end_line,
             is_nested=is_nested,
             is_property=any(_decorator_name(d) == "property" for d in node.decorator_list),
             decorators=[_decorator_name(d) for d in node.decorator_list],
             parent=".".join(self._scope) if self._kind[-1] != "module" else None,
-        ))
+            calls=[],
+        )
+        self.functions.append(pf)
         self._scope.append(node.name)
         self._kind.append("func")
-        self.generic_visit(node)
+        # FEAT-0017: record direct call sites in source order. Decorators are
+        # evaluated at def-time (not call-time), so visit them WITHOUT a call
+        # stack to keep them out of call_sequence. Body statements get the stack.
+        self._call_stacks.append(pf.calls)
+        for stmt in node.body:
+            self.visit(stmt)
+        self._call_stacks.pop()
         self._scope.pop()
         self._kind.pop()
 
@@ -146,6 +161,19 @@ class _ScannerVisitor(ast.NodeVisitor):
         self._handle_func(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        # FEAT-0017: retain classes with source ranges + direct method names.
+        self.classes.append({
+            "name": node.name,
+            "qualified_name": self._qual(node.name),
+            "line_start": node.lineno,
+            "line_end": getattr(node, "end_lineno", None) or node.lineno,
+            "decorators": [_decorator_name(d) for d in node.decorator_list],
+            "methods": [
+                n.name for n in node.body
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            ],
+            "parent": ".".join(self._scope) if self._kind[-1] != "module" else None,
+        })
         self._scope.append(node.name)
         self._kind.append("class")
         self.generic_visit(node)
@@ -194,6 +222,11 @@ class _ScannerVisitor(ast.NodeVisitor):
                 target="<dynamic>", lineno=node.lineno,
                 is_conditional=bool(self._in_try), is_dynamic=True,
             ))
+        # FEAT-0017: record direct call sites in source order (call_sequence).
+        # Only when inside a function body (a call stack is active). Dynamic
+        # dispatch (exec/eval/importlib) is excluded — it has no static target.
+        elif self._call_stacks and fn and not fn.startswith("("):
+            self._call_stacks[-1].append(ParsedCall(name=fn, line=node.lineno))
         self.generic_visit(node)
 
     # Section 14: try/except import → is_conditional on both branches
@@ -215,6 +248,7 @@ class _ScannerVisitor(ast.NodeVisitor):
             path=Path(self.module),
             functions=self.functions,
             imports=self.imports,
+            classes=self.classes,
             exported_names=self.exported_names,
             warnings=self.warnings,
         )
@@ -281,5 +315,19 @@ importlib.import_module("dynamic.mod")
     bad = Path(tempfile.mkdtemp()) / "bad.py"
     bad.write_text("def (:\n")
     assert "parse failed" in " ".join(safe_parse(bad).warnings)
+
+    # FEAT-0017: source ranges, direct call sites, and classes are retained.
+    src2 = "class C:\n    def m(self):\n        self.helper()\n        return 1\n    def helper(self):\n        return 2\n"
+    p2 = Path(tempfile.mkdtemp()) / "ranges.py"
+    p2.write_text(src2)
+    r2 = safe_parse(p2)
+    quals2 = {f.qualified_name: f for f in r2.functions}
+    m = quals2["ranges.C.m"]
+    assert m.line_start == 2 and m.line_end == 4, (m.line_start, m.line_end)
+    assert [c.name for c in m.calls] == ["self.helper"], m.calls
+    assert [c.line for c in m.calls] == [3], m.calls
+    assert r2.classes[0]["name"] == "C"
+    assert r2.classes[0]["line_start"] == 1 and r2.classes[0]["line_end"] == 6
+    assert r2.classes[0]["methods"] == ["m", "helper"]
 
     print("self-check ok")

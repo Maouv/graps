@@ -18,6 +18,20 @@ from typing import Protocol, runtime_checkable
 
 
 @dataclass
+class ParsedCall:
+    """A direct static call site inside a function body (data-contracts call_sequence).
+
+    ``name``  : flattened callee expression text (``foo``, ``self.bar``, ``mod.fn``).
+    ``line``  : 1-based source line of the call.
+    Order is source order (list position); graph_builder assigns deterministic
+    ``order`` and resolves target/candidates/confidence at build time.
+    ponytail: kept parser-agnostic — no target here; resolution is graph layer.
+    """
+    name: str
+    line: int = 0
+
+
+@dataclass
 class ParsedFunction:
     name: str
     # --- BLUEPRINT §4 fields (parser MVP fills name/decorators/line_start; rest
@@ -36,6 +50,8 @@ class ParsedFunction:
     is_nested: bool = False      # Section 14: nested funcs are children, not top-level
     is_property: bool = False    # Section 14: @property flag
     parent: str | None = None    # enclosing func/class qualified_name
+    # --- experimental-graps FEAT-0017: direct static call sites in source order ---
+    calls: list[ParsedCall] = field(default_factory=list)
 
 
 @dataclass
