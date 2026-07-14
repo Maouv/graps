@@ -202,3 +202,83 @@ btw icon yang aku kasih cuma untuk ai-panel yaitu kanan, untuk kiri dir-panel 2 
 icon ada di
 ~/graps/graps/public/icon
 
+## Struktur Plan Wajib
+
+Plan implementasi experimental Graps dibagi menjadi 17 section (`§0` sampai `§16`):
+
+| Section | Nama | Isi utama |
+|---|---|---|
+| §0 | Keputusan Final | Semua keputusan yang sudah disepakati dan tidak perlu diperdebatkan ulang. |
+| §1 | Goal, Scope, dan Non-goals | Tujuan implementasi, batas cakupan, dan hal yang sengaja ditunda. |
+| §2 | Terminologi dan Source of Truth | Definisi project, module, file, function, route, flow, structural data, dan semantic data. |
+| §3 | Architecture Overview | Pipeline scanner → parser → knowledge graph → AI enrichment → architecture map → UI. |
+| §4 | Data Model dan Schema | Kontrak data untuk project, module, file, function, route, flow, dan enrichment. |
+| §5 | Structural Scanner | Scan file/folder/package serta ekstraksi AST, classes, functions, imports, routes, comments, annotations, decorators, dan call sites. |
+| §6 | Module Resolution | Aturan folder/package sebagai structural boundary serta AI grouping suggestion tanpa menghilangkan boundary asli. |
+| §7 | Hybrid Flow Engine | Structural call order, branch, confidence, unresolved calls, dan semantic label dari AI. |
+| §8 | AI Enrichment | Instructor, Pydantic schema, validation, retries, cache, fallback, dan larangan AI mengubah structural truth. |
+| §9 | Storage dan Cache | Penyimpanan per project di `{scan_root}/.graps`, graph hash, incremental refresh, dan scan exclusion. |
+| §10 | Settings dan Scan Behavior | Structural scan selalu aktif, AI Enrichment default ON, behavior OFF/no-key/failure, dan command `/scan`. |
+| §11 | Backend dan API Contracts | Endpoint, request/response schema, status scan, source retrieval, settings, dan error states. |
+| §12 | Frontend Layout dan Interaction | `dir-panel`, `workspace`, `ai-panel`, explorer, source/flow/module tabs, resize, dan panel toggle. |
+| §13 | Design System | Color tokens, spacing, border, Microsoft VS Code Codicons, responsive behavior, dan accessibility. |
+| §14 | Per-file Change Map | File baru, file yang diubah, file yang dihapus, serta file yang tidak boleh disentuh. |
+| §15 | Implementation Phases | Urutan implementasi, dependency, migration, packaging, dan cleanup strategy. |
+| §16 | Tests dan Acceptance Criteria | Unit, integration, UI, responsive, fallback, failure cases, dan definisi selesai yang terukur. |
+
+Scanner dan AI wajib tetap menjadi section terpisah. Structural flow dan semantic label juga tidak boleh digabung. Data schema harus diselesaikan sebelum implementasi UI.
+
+## Inventory Fitur Baru
+
+Total scope terdiri dari 20 capabilities: 15 user-facing features dan 5 backend foundations. Microsoft VS Code Codicons adalah bagian design system, bukan fitur terpisah.
+
+### User-facing Features (15)
+
+1. Three-panel application shell.
+2. `dir-panel` explorer.
+3. `workspace` sebagai area utama.
+4. `ai-panel` dengan input bar.
+5. Panel open/close menggunakan split icons.
+6. Resizable left and right panels.
+7. Responsive layout dengan mental model desktop yang sama pada desktop, tablet, dan mobile.
+8. Folder/package/module tree.
+9. Expandable file dan function hierarchy.
+10. Source-code tabs.
+11. Function flow tabs.
+12. Module overview tabs.
+13. VS Code-like tab lifecycle, deduplication, close behavior, overflow, dan persistence.
+14. Settings untuk AI Enrichment dengan default ON.
+15. Input command `/scan` untuk manual refresh.
+
+### Backend Foundations (5)
+
+16. Automatic structural project scan yang selalu aktif tanpa AI.
+17. Extended knowledge graph untuk classes, functions, routes, calls, packages, dan unresolved edges.
+18. Structural module resolution dengan optional AI grouping suggestion.
+19. Hybrid flow engine: structural order dari static analysis dan semantic labels dari AI.
+20. Project-local incremental storage dan cache di `{scan_root}/.graps`.
+
+### Requirement Wajib, Bukan Fitur Terpisah
+
+- Instructor + Pydantic untuk structured AI output.
+- Semantic validation terhadap structural IDs, edges, dan order.
+- AI OFF, missing API key, invalid response, dan provider failure fallback ke structural labels.
+- AI tidak boleh membuat edge, mengubah urutan, atau menghapus structural node.
+- Microsoft VS Code Codicons sebagai satu-satunya icon system; asset dipilih dan disimpan lokal, tanpa runtime CDN.
+- Accessibility, keyboard support, `aria-label`, dan touch target minimal 44px.
+- Structural graph hashing dan selective re-enrichment hanya untuk module yang berubah.
+- Empty reserved layout regions tetap benar-benar kosong sampai ada keputusan fitur.
+- Loading, scan status, empty state, dan error state.
+- Path traversal protection dan `.graps` otomatis dikecualikan dari scan.
+
+## Fase Implementasi
+
+20 capabilities di atas dikerjakan dalam empat fase dependency-driven:
+
+1. **Foundation** — schema, scanner, knowledge graph, storage, dan cache.
+2. **Intelligence** — module resolution, structural flow, Instructor AI enrichment, validation, dan fallback.
+3. **Application UI** — tiga panel, explorer, workspace, tabs, settings, input bar, dan Codicons.
+4. **Hardening** — responsive behavior, persistence, accessibility, tests, packaging, dan failure handling.
+
+Capability count bukan task count. Saat dipecah menjadi engineering task yang dapat diuji, scope diperkirakan menjadi sekitar 30–40 task dan harus diurutkan berdasarkan dependency.
+
