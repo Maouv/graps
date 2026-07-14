@@ -7,8 +7,7 @@ Module ini hanya tahu cara menyusun :class:`FastAPI` dengan:
 - route ``POST /api/ai/chat`` (Phase 5) yang assemble context via
   ``build_ai_context`` lalu dispatch ke ``graps.ai.provider.chat``,
 - route ``POST /api/ai/summary`` (DEPRECATED Phase 5 — keep route, return
-  deprecation response; logic provider/cache tidak jalan),
-- mount static frontend di ``/`` (paling akhir supaya API tidak ke-shadow).
+  deprecation response; logic provider/cache tidak jalan).
 
 Default bind ``127.0.0.1`` (loopback) ditetapkan caller (``cli.py``) via
 param ``host``. Loopback → envelope security ketat (CORS + CSRF + DNS
@@ -31,7 +30,6 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # ponytail: dipanggil sebagai `python graps/server/app.py` (self-check) butuh
@@ -49,7 +47,6 @@ from graps.ai.provider import AIError  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-FRONTEND_DIR: Path = Path(__file__).parent.parent / "frontend"
 DEFAULT_CACHE_PATH: Path = Path.cwd() / ".graps" / "cache.json"
 
 
@@ -369,8 +366,8 @@ def create_app(
         """Tolak POST/PUT/DELETE tanpa Origin valid (CSRF guard, BLUEPRINT §11).
 
         Fail-closed: state-mutating methods WAJIB membawa Origin yang sah.
-        Browser selalu set Origin pada same-origin POST, jadi frontend tetap
-        jalan; non-browser client (curl/script) yang omit Origin ditolak 403
+        Browser selalu set Origin pada same-origin POST; non-browser client
+        (curl/script) yang omit Origin ditolak 403
         supaya tidak bisa bypass CSRF guard (report-bug-finder Finding 2).
 
         Di-relax (passthrough) saat bind non-loopback — user sengaja expose.
@@ -413,8 +410,7 @@ def create_app(
         """Chat endpoint (Phase 5, stateless).
 
         Semua error AI dikembalikan sebagai HTTP 200 dengan ``error_type``
-        supaya browser tidak memunculkan dialog auth dan frontend bisa
-        memutuskan UI sendiri (BLUEPRINT §10).
+        supaya caller bisa menangani error tanpa dialog auth (BLUEPRINT §10).
         """
         if not req.message.strip():
             return {"enabled": False, "reason": "empty_message", "warnings": []}
@@ -500,14 +496,6 @@ def create_app(
             return {"file": file, "fn": fn, "source": body, "language": language}
 
         return {"file": file, "fn": None, "source": raw, "language": language}
-
-    # Static mount HARUS terakhir — kalau di-mount sebelum route, "/" akan
-    # menelan request dan API ter-shadow. Skip dengan warning kalau frontend
-    # belum ada (mis. saat test atau saat dev install tanpa frontend bundle).
-    if FRONTEND_DIR.exists():
-        app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
-    else:
-        logger.warning("FRONTEND_DIR %s tidak ada — static mount di-skip", FRONTEND_DIR)
 
     return app
 

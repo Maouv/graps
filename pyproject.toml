@@ -63,15 +63,9 @@ graps = "graps.cli:app"
 [tool.hatch.build.targets.wheel]
 packages = ["graps"]
 
-# ponytail: hatchling only ships .py files by default; force-include needed
-# for non-.py frontend assets (HTML/JS/CSS) inside the graps package.
-[tool.hatch.build.targets.wheel.force-include]
-"graps/frontend" = "graps/frontend"
-
 [tool.hatch.build.targets.sdist]
 include = [
   "graps/",
-  "graps/frontend/",
   "tests/",
   "pyproject.toml",
   "README.md",
