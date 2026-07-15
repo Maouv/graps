@@ -140,7 +140,7 @@ Verify security, accessibility, compatibility, performance, packaging, and failu
 ## 4. Execution Checklist
 - [x] Validate API inputs and source-root boundaries. — All endpoints tested (2026-07-15): `/api/source` credential block + error leak fix, `/api/modules` + `/api/flows` 404, `/api/settings` GET/PUT whitelist + CSRF + SettingsUpdate closure bug fix, `/api/scan/status`. 174/174 pass.
 - [x] Test traversal, credential-context, origin/host, cache migration, and fallback. — 7 new tests (2026-07-15): traversal (`../`, absolute, deep nested) → 400; credential in subdir (`config/.env`) → 404; mixed tagged (`.env` + `a.py`) → credential excluded, legit included; deprecated endpoint cache_path no side-effect; provider empty reply graceful. 181/181 pass.
-- [ ] Measure representative scan and cached-load budgets.
+- [x] Measure representative scan and cached-load budgets. — Benchmark on repo itself (2026-07-15): 129 files, 463 functions, 2483 edges, 515 flows, 1359 KB graph JSON. Scan (cold): 1.44s total (discover 0.84s, parse 0.45s, build 0.14s). Cache (warm): 0.073s. ~20x speedup. Interactive scan viable, cache load near-instant.
 - [ ] Update README only after behavior is exercised.
 
 ## 5. Definition of Done
@@ -202,4 +202,4 @@ Verify security, accessibility, compatibility, performance, packaging, and failu
 - Defer only with a linked backlog/entity and an explicit reason.
 
 ## 7. Closing
-- Status: `in-progress`. Items 1–2 done. 181/181 tests pass. Remaining: items 3–4 (measure scan/cached-load budgets, update README).
+- Status: `in-progress`. Items 1–3 done. 181/181 tests pass. Scan 1.44s, cache 0.073s (~20x). Remaining: item 4 (update README).
