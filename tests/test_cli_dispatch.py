@@ -63,7 +63,7 @@ class TestDiscover:
 
 
 class TestParseFileDispatch:
-    """_parse_file() → TreeSitterParser, fallback ke ASTParser untuk .py."""
+    """_parse_file() → ASTParser untuk .py, TreeSitterParser untuk non-Python."""
 
     def test_python_file(self, tmp_path: Path) -> None:
         f = tmp_path / "x.py"
@@ -113,8 +113,7 @@ class TestBuildEndToEnd:
         assert graph["scan"]["file_count"] == 0
 
     def test_py_fallback_works(self, tmp_path: Path) -> None:
-        """Kalau tree-sitter return None untuk .py, ASTParser fallback."""
-        # File Python valid → TreeSitterParser sukses, tidak perlu fallback.
+        """ASTParser handles .py files directly (first-class, complete data)."""
         # Test ini verify _build tetap menghasilkan graph untuk .py.
         (tmp_path / "solo.py").write_text("def only_func(): pass\n")
         graph = _build(tmp_path, set())

@@ -102,20 +102,12 @@ def _discover(path: Path, exclude: set[str]) -> list[Path]:
 def _parse_file(path: Path, root: Path) -> ParsedFile | None:
     """Dispatch parser per file.
 
-    TreeSitterParser dulu. Kalau gagal dan file .py → fallback ke ASTParser.
-    Non-Python tanpa fallback → None (unsupported).
+    .py → ASTParser (first-class: calls, branches, routes, constants).
+    Non-Python → TreeSitterParser (Phase 4 multi-language adapter).
     """
-    ts_parser = TreeSitterParser()
-    result = ts_parser.parse_file(path, root)
-
-    if result is not None:
-        return result
-
     if path.suffix == ".py":
-        logger.debug("tree-sitter failed for %s, falling back to ASTParser", path)
         return safe_parse(path)
-
-    return None
+    return TreeSitterParser().parse_file(path, root)
 
 
 def _build(path: Path, exclude: set[str]) -> dict[str, Any]:
