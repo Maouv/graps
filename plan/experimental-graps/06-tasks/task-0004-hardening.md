@@ -66,7 +66,7 @@ related: [FEAT-0001, FEAT-0002, FEAT-0003, FEAT-0004, FEAT-0005, FEAT-0006, FEAT
 
 ### 12. Testing
 
-- Not started — implementation is not yet authorized.
+- In progress (2026-07-15). 181/181 tests pass across `tests/test_api.py`, `tests/test_validator.py`, `tests/test_scanner.py`, `tests/test_storage.py`, `tests/test_flows.py`. Self-check in `app.py __main__` passes. Coverage: graph schema, security middleware (host/origin/CSRF), AI chat (empty/no-key/auth-fail/rate-limit/sdk-missing/enrichment-off), build_ai_context (credential exclusion, file-not-in-graph, mixed tagged), /api/source (traversal, credential block, read error), /api/modules, /api/flows, /api/settings (GET/PUT/CSRF), /api/scan/status, cache migration (deprecated no side-effect), fallback (provider empty reply, AI output cannot alter graph truth).
 
 ### 13. QA
 
@@ -82,15 +82,15 @@ related: [FEAT-0001, FEAT-0002, FEAT-0003, FEAT-0004, FEAT-0005, FEAT-0006, FEAT
 
 ### 16. Negative Scenario Review
 
-- Not started — implementation is not yet authorized.
+- In progress (2026-07-15). Negative test cases exercised: path traversal (`../`, absolute `/etc/passwd`, deep nested `a/../../../etc/passwd`) → 400. Credential file access at `/api/source` (`.env`, `.pem`, `config/.env` subdir) → 404. Origin prefix bypass (`localhost:port.evil.com`, `@evil.com`, `portx`) → 403. Missing Origin (curl-style) → 403 fail-closed. Invalid Host header → 400. Unknown module/flow IDs → 404. AI output cannot alter graph truth (malicious reply passthrough).
 
 ### 17. Security Review
 
-- In progress (2026-07-15). `/api/source` credential blocking + error leak fix applied. Credential files (`.env`, `.pem`, `.key`, etc.) now return 404 at `/api/source`. OSError details no longer serialized in 500 response. `PUT /api/settings` fixed (was broken due to closure-scoped Pydantic model). All endpoints now have test coverage: modules/flows 404, settings whitelist + CSRF, scan/status. 174/174 tests pass.
+- In progress (2026-07-15). `/api/source` credential blocking + error leak fix applied. Credential files (`.env`, `.pem`, `.key`, etc.) now return 404 at `/api/source` — including subdirectory paths (`config/.env`). OSError details no longer serialized in 500 response. `PUT /api/settings` fixed (was broken due to closure-scoped Pydantic model). All endpoints now have test coverage: modules/flows 404, settings whitelist + CSRF, scan/status. Traversal vectors (`../`, absolute, deep nested) blocked → 400. Origin prefix bypass rejected → 403. 181/181 tests pass.
 
 ### 18. Performance Review
 
-- Not started — implementation is not yet authorized.
+- In progress (2026-07-15). Benchmark on graps repo (129 files, 463 functions, 2483 edges, 515 flows, 1359 KB graph JSON). Scan (cold): 1.44s total — discover 0.84s (rglob bottleneck), parse 0.45s, build 0.14s. Cache (warm): 0.073s (read_graph + read_file_index). ~20x speedup. Interactive scan viable (<2s for 129 files), cache load near-instant (73ms). No optimization needed for representative codebase size.
 
 ### 19. Compatibility Review
 
