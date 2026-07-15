@@ -51,13 +51,14 @@
 ---
 
 ### DEC-0008: Instructor dependency gate
-- **Tanggal:** 2026-07-14
+- **Tanggal:** 2026-07-14 (approved: 2026-07-15)
 - **Diputuskan oleh:** Maou
 - **Konteks/Masalah:** Instructor dependency gate membutuhkan aturan durable lintas feature/task.
 - **Opsi yang dipertimbangkan:** mempertahankan perilaku lama, memilih alternatif ad hoc, atau memakai kontrak terstruktur.
 - **Keputusan:** Plan Instructor + Pydantic validation but install only after exact pin and explicit approval.
 - **Alasan:** Structured retries help shape validation, but dependencies cannot be added implicitly.
 - **Dampak/Konsekuensi:** AI implementation pauses at the gate if approval is absent.
+- **Approval:** Granted by Maou on 2026-07-15. Installed `instructor==1.15.4` (Pydantic 2.13.4 already present). Pinned in `pyproject.toml` `ai` + `full` extras.
 - **Terkait:** lihat index feature/task dan SSoT design/architecture.
 
 ---

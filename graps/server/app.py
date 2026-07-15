@@ -437,6 +437,12 @@ def create_app(
         if not req.message.strip():
             return {"enabled": False, "reason": "empty_message", "warnings": []}
 
+        # FEAT-0019: ai_enrichment OFF → disabled (structural browsing continues).
+        if scan_root is not None:
+            _settings = storage.read_settings(scan_root)
+            if not _settings.get("ai_enrichment", True):
+                return {"enabled": False, "reason": "ai_enrichment_off", "warnings": []}
+
         context, warnings = build_ai_context(req.tagged, graph_data, scan_root)
 
         provider = provider_module.get_provider()

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from graps.scanner import ParsedFile, ParsedImport
-from graps.scanner.flows import build_call_edges_and_flows
+from graps.scanner.flows import build_call_edges_and_flows, build_control_flows, build_request_flows
 from graps.scanner.ids import (
     class_id,
     content_hash,
@@ -140,6 +140,10 @@ def _build_functions(results: list[ParsedFile], root: Path) -> list[dict[str, An
                 "is_nested": f.is_nested,
                 "is_property": f.is_property,
                 "parent": f.parent,
+                "routes": [
+                    {"method": rt.method, "path": rt.path, "line": rt.line}
+                    for rt in f.routes
+                ],
             })
     return out
 
@@ -281,6 +285,8 @@ def build_graph(results: list[ParsedFile], root: Path) -> dict[str, Any]:
 
     imports = _build_imports(results_sorted, root)
     call_edges, flows = build_call_edges_and_flows(results_sorted, root)
+    flows.extend(build_control_flows(results_sorted, root))
+    flows.extend(build_request_flows(results_sorted, root))
     contains = _build_contains(results_sorted, root)
     module_depends = _build_module_depends(modules)
     diagnostics = _build_diagnostics(results_sorted, root)
@@ -360,7 +366,10 @@ if __name__ == "__main__":
         blob = json.dumps(g, sort_keys=True)
         assert root.resolve().as_posix() not in blob, "absolute path leaked"
         # Malformed file -> diagnostic, but graph still produced (FEAT-0016).
-        assert any(d["file"] == "bad.py" and d["code"] == "parse_error" for d in g["scan"]["diagnostics"])
+        assert any(
+            d["file"] == "bad.py" and d["code"] == "parse_error"
+            for d in g["scan"]["diagnostics"]
+        )
         # C-01 redaction wired through build_graph.
         cfg = next(n for n in g["nodes"]["files"] if n["id"] == "cfg.py")
         assert cfg["constants"][0]["value"] == "[REDACTED]"

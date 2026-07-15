@@ -184,3 +184,128 @@ def test_build_graph__graps_excluded_by_default():
     """FEAT-0020: .graps/ in _DEFAULT_EXCLUDES (scanner filter, bukan graph_builder)."""
     from graps.cli import _DEFAULT_EXCLUDES
     assert ".graps" in _DEFAULT_EXCLUDES
+
+
+# --- FEAT-0019: control_flow tests -------------------------------------------
+
+def test_build_graph__control_flow_branches(tmp_path):
+    """Functions with if/for/while/try/return produce control_flow flows."""
+    (tmp_path / "b.py").write_text(
+        "def f(x):\n"             # 1
+        "    if x > 0:\n"         # 2
+        "        for i in range(x):\n"  # 3
+        "            pass\n"      # 4
+        "    while x > 0:\n"      # 5
+        "        x -= 1\n"        # 6
+        "        if x == 5:\n"    # 7
+        "            return x\n"  # 8
+        "    try:\n"             # 9
+        "        pass\n"         # 10
+        "    except ValueError:\n"  # 11
+        "        pass\n"         # 12
+        "    return 0\n"         # 13
+    )
+    results = [safe_parse(p) for p in tmp_path.rglob("*.py")]
+    g = build_graph(results, tmp_path)
+    cf = [f for f in g["flows"] if f["kind"] == "control_flow"]
+    assert len(cf) == 1, cf
+    flow = cf[0]
+    assert flow["root_id"] == "b.py::b.f"
+    assert flow["confidence"] == "resolved"
+    kinds = [s["kind"] for s in flow["steps"]]
+    assert kinds == ["if", "for", "while", "if", "return", "try", "except", "return"], kinds
+    assert [s["line"] for s in flow["steps"]] == [2, 3, 5, 7, 8, 9, 11, 13]
+    assert [s["order"] for s in flow["steps"]] == list(range(8))
+
+
+def test_build_graph__control_flow_absent_without_branches(tmp_path):
+    """Functions with no if/for/while/try/return produce no control_flow."""
+    (tmp_path / "plain.py").write_text("def f():\n    x = 1\n    y = x + 1\n")
+    results = [safe_parse(p) for p in tmp_path.rglob("*.py")]
+    g = build_graph(results, tmp_path)
+    cf = [f for f in g["flows"] if f["kind"] == "control_flow"]
+    assert len(cf) == 0, cf
+
+
+def test_build_graph__control_flow_return_only(tmp_path):
+    """A single return still produces a control_flow (return is a branch marker)."""
+    (tmp_path / "r.py").write_text("def f():\n    return 42\n")
+    results = [safe_parse(p) for p in tmp_path.rglob("*.py")]
+    g = build_graph(results, tmp_path)
+    cf = [f for f in g["flows"] if f["kind"] == "control_flow"]
+    assert len(cf) == 1, cf
+    assert cf[0]["steps"] == [{"kind": "return", "line": 2, "order": 0}]
+
+
+# --- FEAT-0019: request_flow tests -------------------------------------------
+
+def test_build_graph__request_flow_fastapi_routes(tmp_path):
+    """FastAPI-style route decorators produce request_flow flows."""
+    (tmp_path / "api.py").write_text(
+        "app = None\n"                        # 1
+        "\n"
+        '@app.get("/users")\n'                # 3
+        "def get_users():\n"                  # 4
+        "    return \"users\"\n"             # 5
+        "\n"
+        '@app.post("/items")\n'              # 7
+        "def create_item():\n"               # 8
+        "    return \"items\"\n"             # 9
+    )
+    results = [safe_parse(p) for p in tmp_path.rglob("*.py")]
+    g = build_graph(results, tmp_path)
+    rf = [f for f in g["flows"] if f["kind"] == "request_flow"]
+    assert len(rf) == 2, rf
+    r0 = next(f for f in rf if "get_users" in f["root_id"])
+    assert r0["confidence"] == "resolved"
+    assert r0["steps"] == [{"method": "GET", "path": "/users", "line": 3, "order": 0}]
+    r1 = next(f for f in rf if "create_item" in f["root_id"])
+    assert r1["steps"] == [{"method": "POST", "path": "/items", "line": 7, "order": 0}]
+
+
+def test_build_graph__request_flow_flask_route(tmp_path):
+    """Flask-style @app.route produces request_flow with method from kwargs."""
+    (tmp_path / "flask_app.py").write_text(
+        "app = None\n"
+        "\n"
+        '@app.route("/health", methods=["GET"])\n'   # 3
+        "def health():\n"                             # 4
+        "    return \"ok\"\n"                         # 5
+        "\n"
+        '@app.route("/submit", methods=["POST"])\n'  # 7
+        "def submit():\n"                             # 8
+        "    return \"submitted\"\n"                  # 9
+    )
+    results = [safe_parse(p) for p in tmp_path.rglob("*.py")]
+    g = build_graph(results, tmp_path)
+    rf = [f for f in g["flows"] if f["kind"] == "request_flow"]
+    assert len(rf) == 2, rf
+    h = next(f for f in rf if "health" in f["root_id"])
+    assert h["steps"][0]["method"] == "GET"
+    assert h["steps"][0]["path"] == "/health"
+    s = next(f for f in rf if "submit" in f["root_id"])
+    assert s["steps"][0]["method"] == "POST"
+    assert s["steps"][0]["path"] == "/submit"
+
+
+def test_build_graph__request_flow_absent_without_routes(tmp_path):
+    """Functions without route decorators produce no request_flow."""
+    (tmp_path / "plain.py").write_text("def f():\n    return 1\n")
+    results = [safe_parse(p) for p in tmp_path.rglob("*.py")]
+    g = build_graph(results, tmp_path)
+    rf = [f for f in g["flows"] if f["kind"] == "request_flow"]
+    assert len(rf) == 0, rf
+
+
+def test_build_graph__function_node_has_routes(tmp_path):
+    """Function nodes include route metadata."""
+    (tmp_path / "api.py").write_text(
+        "app = None\n"
+        '@app.get("/users")\n'   # 2
+        "def get_users():\n"
+        "    return \"users\"\n"
+    )
+    results = [safe_parse(p) for p in tmp_path.rglob("*.py")]
+    g = build_graph(results, tmp_path)
+    fn = next(f for f in g["nodes"]["functions"] if f["name"] == "get_users")
+    assert fn["routes"] == [{"method": "GET", "path": "/users", "line": 2}]

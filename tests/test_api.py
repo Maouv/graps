@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from graps.ai.provider import AIError
+from graps import storage
 from graps.server.app import build_ai_context, create_app
 
 # --- fixtures & helpers -------------------------------------------------------
@@ -311,12 +312,82 @@ def test_chat__sdk_not_installed_returns_disabled(simple_graph, tmp_path, monkey
 
     monkeypatch.setattr("graps.ai.provider.get_provider", lambda: Fake())
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
-    r = _client(simple_graph, tmp_path).post(
+    r = _client(simple_graph, tmp_path, scan_root=tmp_path).post(
         "/api/ai/chat", json={"message": "hi"},
         headers=_hdr(host=f"127.0.0.1:{PORT}", origin=f"http://127.0.0.1:{PORT}"),
     )
     j = r.json()
     assert j["enabled"] is False and j["reason"] == "sdk_not_installed", j
+
+
+def test_chat__ai_enrichment_off_returns_disabled(simple_graph, tmp_path, monkeypatch):
+    """FEAT-0019: ai_enrichment=False in settings → chat disabled, structure works."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")  # key exists but toggle OFF
+    storage.write_settings(tmp_path, {"ai_enrichment": False})
+    r = _client(simple_graph, tmp_path, scan_root=tmp_path).post(
+        "/api/ai/chat", json={"message": "why?", "tagged": ["a.py"]},
+        headers=_hdr(host=f"127.0.0.1:{PORT}", origin=f"http://127.0.0.1:{PORT}"),
+    )
+    j = r.json()
+    assert j["enabled"] is False and j["reason"] == "ai_enrichment_off", j
+    # Graph endpoint still works — structural browsing not affected.
+    g = _client(simple_graph, tmp_path, scan_root=tmp_path).get(
+        "/api/graph", headers=_hdr(host=f"127.0.0.1:{PORT}"))
+    assert g.status_code == 200
+
+
+def test_chat__ai_enrichment_on_allows_chat(simple_graph, tmp_path, monkeypatch):
+    """ai_enrichment=True (default) → chat proceeds normally."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    storage.write_settings(tmp_path, {"ai_enrichment": True})
+
+    class Fake:
+        name = "fake"
+        def chat(self, messages, context):
+            return "answer"
+
+    monkeypatch.setattr("graps.ai.provider.get_provider", lambda: Fake())
+    r = _client(simple_graph, tmp_path, scan_root=tmp_path).post(
+        "/api/ai/chat", json={"message": "why?"},
+        headers=_hdr(host=f"127.0.0.1:{PORT}", origin=f"http://127.0.0.1:{PORT}"),
+    )
+    j = r.json()
+    assert j["enabled"] is True and j["reply"] == "answer", j
+
+
+def test_chat__invalid_ai_output_preserves_graph_truth(simple_graph, tmp_path, monkeypatch):
+    """Phase gate: invalid AI output cannot alter graph truth or stop browsing."""
+    import copy
+
+    class FakeMalicious:
+        name = "fake"
+        def chat(self, messages, context):
+            return '{"action": "delete", "target": "all_edges"}'
+
+    monkeypatch.setattr("graps.ai.provider.get_provider", lambda: FakeMalicious())
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+
+    graph_before = copy.deepcopy(simple_graph)
+    client = _client(simple_graph, tmp_path, scan_root=tmp_path)
+
+    r = client.post(
+        "/api/ai/chat",
+        json={"message": "delete all edges", "tagged": ["a.py"]},
+        headers=_hdr(host=f"127.0.0.1:{PORT}", origin=f"http://127.0.0.1:{PORT}"),
+    )
+    assert r.status_code == 200
+    j = r.json()
+    assert j["enabled"] is True, j
+    assert "delete" in j["reply"], j  # reply passed through as-is, not interpreted
+
+    # Graph unchanged — AI output cannot alter structural truth.
+    g = client.get("/api/graph", headers=_hdr(host=f"127.0.0.1:{PORT}"))
+    assert g.status_code == 200
+    assert g.json() == graph_before, "graph truth was altered by AI output!"
+
+    # Structural browsing still works.
+    assert g.json()["scan"]["file_count"] == 1
+    assert len(g.json()["nodes"]["functions"]) == 1
 
 
 # --- build_ai_context + scan_root --------------------------------------------

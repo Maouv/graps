@@ -32,6 +32,34 @@ class ParsedCall:
 
 
 @dataclass
+class ParsedBranch:
+    """A control-flow branch marker inside a function body (data-contracts control_flow).
+
+    ``kind``  : branch type (``if``, ``elif``, ``else``, ``for``, ``while``,
+                ``try``, ``except``, ``finally``, ``return``).
+    ``line``  : 1-based source line of the branch keyword.
+    Order is source order (list position); graph_builder assigns ``order`` at build.
+    ponytail: no condition text — structural fact only, no AI.
+    """
+    kind: str
+    line: int = 0
+
+
+@dataclass
+class ParsedRoute:
+    """An HTTP route decorator on a function (data-contracts request_flow).
+
+    ``method`` : HTTP method (``GET``, ``POST``, ``PUT``, ``DELETE``, ``PATCH``).
+    ``path``   : route path string (``/users``, ``/items/{id}``).
+    ``line``   : 1-based source line of the decorator.
+    ponytail: no query/param schema — structural route identity only, no AI.
+    """
+    method: str
+    path: str
+    line: int = 0
+
+
+@dataclass
 class ParsedFunction:
     name: str
     # --- BLUEPRINT §4 fields (parser MVP fills name/decorators/line_start; rest
@@ -52,6 +80,10 @@ class ParsedFunction:
     parent: str | None = None    # enclosing func/class qualified_name
     # --- experimental-graps FEAT-0017: direct static call sites in source order ---
     calls: list[ParsedCall] = field(default_factory=list)
+    # --- experimental-graps FEAT-0019: control-flow branch markers in source order ---
+    branches: list[ParsedBranch] = field(default_factory=list)
+    # --- experimental-graps FEAT-0019: HTTP route decorators (request_flow) ---
+    routes: list[ParsedRoute] = field(default_factory=list)
 
 
 @dataclass

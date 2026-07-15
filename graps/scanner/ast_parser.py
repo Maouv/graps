@@ -8,7 +8,15 @@ import threading
 import tokenize
 from pathlib import Path
 
-from graps.scanner import ParsedCall, ParsedFile, ParsedFunction, ParsedImport, ParseResult
+from graps.scanner import (
+    ParseResult,
+    ParsedBranch,
+    ParsedCall,
+    ParsedFile,
+    ParsedFunction,
+    ParsedImport,
+    ParsedRoute,
+)
 
 _MAX_BYTES = 1_000_000  # 1MB (Section 14)
 _TIMEOUT_S = 5          # Section 14
@@ -19,7 +27,8 @@ _TIMEOUT_S = 5          # Section 14
 # carriers may be re-exported.
 __all__ = [
     "safe_parse", "ASTParser",
-    "ParsedFile", "ParsedFunction", "ParsedImport", "ParsedCall", "ParseResult",
+    "ParsedFile", "ParsedFunction", "ParsedImport",
+    "ParsedCall", "ParsedBranch", "ParsedRoute", "ParseResult",
 ]
 
 
@@ -116,6 +125,8 @@ class _ScannerVisitor(ast.NodeVisitor):
         # FEAT-0017: per-function direct static call sites (source order).
         # Top of stack = current enclosing function's call list; empty at module scope.
         self._call_stacks: list[list[ParsedCall]] = []
+        # FEAT-0019: per-function control-flow branch markers (source order).
+        self._branch_stacks: list[list[ParsedBranch]] = []
         self.functions: list[ParsedFunction] = []
         self.imports: list[ParsedImport] = []
         self.classes: list[dict[str, object]] = []
@@ -139,6 +150,8 @@ class _ScannerVisitor(ast.NodeVisitor):
             decorators=[_decorator_name(d) for d in node.decorator_list],
             parent=".".join(self._scope) if self._kind[-1] != "module" else None,
             calls=[],
+            branches=[],
+            routes=_extract_routes(node.decorator_list),
         )
         self.functions.append(pf)
         self._scope.append(node.name)
@@ -147,9 +160,11 @@ class _ScannerVisitor(ast.NodeVisitor):
         # evaluated at def-time (not call-time), so visit them WITHOUT a call
         # stack to keep them out of call_sequence. Body statements get the stack.
         self._call_stacks.append(pf.calls)
+        self._branch_stacks.append(pf.branches)
         for stmt in node.body:
             self.visit(stmt)
         self._call_stacks.pop()
+        self._branch_stacks.pop()
         self._scope.pop()
         self._kind.pop()
 
@@ -229,13 +244,43 @@ class _ScannerVisitor(ast.NodeVisitor):
             self._call_stacks[-1].append(ParsedCall(name=fn, line=node.lineno))
         self.generic_visit(node)
 
+    # FEAT-0019: control-flow branch markers (if/for/while/try/return).
+    def visit_If(self, node: ast.If) -> None:
+        if self._branch_stacks:
+            self._branch_stacks[-1].append(ParsedBranch(kind="if", line=node.lineno))
+        self.generic_visit(node)
+
+    def visit_For(self, node: ast.For) -> None:
+        if self._branch_stacks:
+            self._branch_stacks[-1].append(ParsedBranch(kind="for", line=node.lineno))
+        self.generic_visit(node)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        if self._branch_stacks:
+            self._branch_stacks[-1].append(ParsedBranch(kind="for", line=node.lineno))
+        self.generic_visit(node)
+
+    def visit_While(self, node: ast.While) -> None:
+        if self._branch_stacks:
+            self._branch_stacks[-1].append(ParsedBranch(kind="while", line=node.lineno))
+        self.generic_visit(node)
+
+    def visit_Return(self, node: ast.Return) -> None:
+        if self._branch_stacks:
+            self._branch_stacks[-1].append(ParsedBranch(kind="return", line=node.lineno))
+        self.generic_visit(node)
+
     # Section 14: try/except import → is_conditional on both branches
     def visit_Try(self, node: ast.Try) -> None:
+        if self._branch_stacks:
+            self._branch_stacks[-1].append(ParsedBranch(kind="try", line=node.lineno))
         self._in_try += 1
         for child in node.body:
             self.visit(child)
         self._in_try -= 1
         for h in node.handlers:
+            if self._branch_stacks:
+                self._branch_stacks[-1].append(ParsedBranch(kind="except", line=h.lineno))
             self._in_try += 1
             for child in h.body:
                 self.visit(child)
@@ -263,6 +308,53 @@ def _decorator_name(node: ast.expr) -> str:
     if isinstance(node, ast.Call):           # @app.route("/") → app.route
         return _decorator_name(node.func)
     return ""
+
+
+# FEAT-0019: HTTP route decorator extraction (request_flow).
+_HTTP_METHODS = {"get", "post", "put", "delete", "patch"}
+
+
+def _first_str_arg(call: ast.Call) -> str | None:
+    """Extract first string positional arg from a Call node, else None."""
+    if call.args and isinstance(call.args[0], ast.Constant) and isinstance(call.args[0].value, str):
+        return call.args[0].value
+    return None
+
+
+def _method_from_kwargs(call: ast.Call) -> str:
+    """Extract HTTP method from Flask ``methods=["GET"]`` kwarg, default GET."""
+    for kw in call.keywords:
+        if kw.arg == "methods" and isinstance(kw.value, ast.List) and kw.value.elts:
+            first = kw.value.elts[0]
+            if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                return first.value.upper()
+    return "GET"
+
+
+def _extract_routes(decorators: list[ast.expr]) -> list[ParsedRoute]:
+    """Extract HTTP routes from decorator list (FastAPI/Flask style).
+
+    Detects ``@app.get("/x")``, ``@router.post("/y")``, ``@app.route("/z")``.
+    Returns [] if no route decorators found.
+    """
+    out: list[ParsedRoute] = []
+    for d in decorators:
+        if not isinstance(d, ast.Call):
+            continue
+        name = _decorator_name(d.func)
+        parts = name.split(".")
+        last = parts[-1].lower() if parts else ""
+        if last == "route":
+            path = _first_str_arg(d)
+            method = _method_from_kwargs(d)
+        elif last in _HTTP_METHODS:
+            path = _first_str_arg(d)
+            method = last.upper()
+        else:
+            continue
+        if path is not None:
+            out.append(ParsedRoute(method=method, path=path, line=d.lineno))
+    return out
 
 
 if __name__ == "__main__":

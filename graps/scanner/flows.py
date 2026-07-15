@@ -25,7 +25,9 @@ from graps.scanner.ids import flow_id, function_id, to_posix_rel
 from graps.scanner.resolver import resolve_import
 
 
-def _build_indexes(results: list[ParsedFile], root: Path):
+def _build_indexes(
+    results: list[ParsedFile], root: Path
+) -> tuple[dict[str, list], dict[str, list[str]]]:
     """file_id -> [ParsedFunction]; short name -> [function_ids]."""
     file_funcs: dict[str, list] = {}
     name_to_ids: dict[str, list[str]] = {}
@@ -144,6 +146,66 @@ def build_call_edges_and_flows(
             })
 
     return call_edges, flows
+
+
+def build_control_flows(results: list[ParsedFile], root: Path) -> list[dict[str, Any]]:
+    """Build control_flow flows from per-function branch markers (FEAT-0019).
+
+    For each function that has branch markers (if/for/while/try/except/return),
+    emit a ``control_flow`` flow with steps in source order. Confidence is always
+    ``resolved`` — these are structural facts from the parser, not AI.
+    """
+    flows: list[dict[str, Any]] = []
+    for r in results:
+        rel = r.id or to_posix_rel(r.path, root)
+        for f in r.functions:
+            if not f.branches:
+                continue
+            src = function_id(rel, f.qualified_name)
+            steps = [
+                {"kind": b.kind, "line": b.line, "order": i}
+                for i, b in enumerate(f.branches)
+            ]
+            flows.append({
+                "id": flow_id(src, "control_flow"),
+                "kind": "control_flow",
+                "root_id": src,
+                "confidence": "resolved",
+                "steps": steps,
+            })
+    return flows
+
+
+def build_request_flows(results: list[ParsedFile], root: Path) -> list[dict[str, Any]]:
+    """Build request_flow flows from per-function route decorators (FEAT-0019).
+
+    For each function that has HTTP route decorators, emit a ``request_flow``
+    flow linking route identity → handler. Confidence is always ``resolved`` —
+    these are structural facts from the parser, not AI.
+
+    ponytail: handler → service/dependency linkage is NOT duplicated here; the
+    call_sequence flow already captures that. This flow captures the route →
+    handler edge only. Upgrade path: cross-reference call_sequence root_id.
+    """
+    flows: list[dict[str, Any]] = []
+    for r in results:
+        rel = r.id or to_posix_rel(r.path, root)
+        for f in r.functions:
+            if not f.routes:
+                continue
+            src = function_id(rel, f.qualified_name)
+            steps = [
+                {"method": rt.method, "path": rt.path, "line": rt.line, "order": i}
+                for i, rt in enumerate(f.routes)
+            ]
+            flows.append({
+                "id": flow_id(src, "request_flow"),
+                "kind": "request_flow",
+                "root_id": src,
+                "confidence": "resolved",
+                "steps": steps,
+            })
+    return flows
 
 
 if __name__ == "__main__":
