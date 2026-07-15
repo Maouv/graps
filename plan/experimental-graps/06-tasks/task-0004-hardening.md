@@ -50,7 +50,7 @@ related: [FEAT-0001, FEAT-0002, FEAT-0003, FEAT-0004, FEAT-0005, FEAT-0006, FEAT
   - **Issue 2 (Security):** `/api/source` did not check credential files. `GET /api/source?file=.env` could return `.env` contents. Fixed: `_is_credential_file()` check added before read, returns 404.
   - **Issue 3 (Bug):** `PUT /api/settings` was broken — `SettingsUpdate` defined inside `create_app` closure, FastAPI couldn't resolve annotation with `from __future__ import annotations`. Fixed: moved to module level.
   - Tests: 12 new tests in `tests/test_api.py` covering `/api/source` credential blocking, error leak, `/api/modules` 404, `/api/flows` 404, `/api/settings` GET/PUT whitelist + CSRF, `/api/scan/status`. Self-check 8b added.
-  - Verification: 174/174 tests pass, `git diff --check` clean, self-check OK.
+  - **Item 2 (Traversal/Credential/Cache/Fallback):** 7 tests added. Path traversal (`../`, absolute `/etc/passwd`, deep nested `a/../../../etc/passwd`) → 400. Credential in subdirectory (`config/.env`) → 404 (verifies `Path.name` basename check works for nested paths). Mixed tagged (`.env` + `a.py`) → credential excluded with warning, legit file included in context. Deprecated `/api/ai/summary` with cache_path set → no cache file created (migration safe). Provider empty reply → graceful (enabled=True, reply=""). 181/181 pass.
 
 ### 9. Self Review
 
@@ -139,7 +139,7 @@ Verify security, accessibility, compatibility, performance, packaging, and failu
 
 ## 4. Execution Checklist
 - [x] Validate API inputs and source-root boundaries. — All endpoints tested (2026-07-15): `/api/source` credential block + error leak fix, `/api/modules` + `/api/flows` 404, `/api/settings` GET/PUT whitelist + CSRF + SettingsUpdate closure bug fix, `/api/scan/status`. 174/174 pass.
-- [ ] Test traversal, credential-context, origin/host, cache migration, and fallback.
+- [x] Test traversal, credential-context, origin/host, cache migration, and fallback. — 7 new tests (2026-07-15): traversal (`../`, absolute, deep nested) → 400; credential in subdir (`config/.env`) → 404; mixed tagged (`.env` + `a.py`) → credential excluded, legit included; deprecated endpoint cache_path no side-effect; provider empty reply graceful. 181/181 pass.
 - [ ] Measure representative scan and cached-load budgets.
 - [ ] Update README only after behavior is exercised.
 
@@ -176,7 +176,7 @@ Verify security, accessibility, compatibility, performance, packaging, and failu
 ### Validation Checklist
 - [x] Targeted unit/API/UI tests pass.
 - [x] `git diff --check` passes.
-- [ ] Failure fallback is exercised.
+- [x] Failure fallback is exercised.
 
 ### Review Checklist
 - [ ] Self Review
@@ -202,4 +202,4 @@ Verify security, accessibility, compatibility, performance, packaging, and failu
 - Defer only with a linked backlog/entity and an explicit reason.
 
 ## 7. Closing
-- Status: `in-progress`. Item 1 done — all API endpoints validated + 3 bugs fixed. 174/174 tests pass. Remaining: items 2–4.
+- Status: `in-progress`. Items 1–2 done. 181/181 tests pass. Remaining: items 3–4 (measure scan/cached-load budgets, update README).

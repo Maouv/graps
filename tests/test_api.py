@@ -659,3 +659,87 @@ def test_scan_status__returns_metadata(simple_graph, tmp_path):
     j = r.json()
     assert "file_count" in j
     assert j["file_count"] == 1
+
+
+# --- Traversal, credential-context, cache migration, fallback (TASK-0004 item 2) ---
+
+
+def test_source__traversal_dotdot_400(simple_graph, tmp_path):
+    """GET /api/source?file=../a.py → 400 (path escape blocked)."""
+    (tmp_path / "a.py").write_text("x = 1")
+    r = _client(simple_graph, tmp_path, scan_root=tmp_path).get(
+        "/api/source", params={"file": "../a.py"},
+        headers=_hdr(host=f"127.0.0.1:{PORT}"),
+    )
+    assert r.status_code == 400, r.status_code
+    assert r.json() == {"error": "Invalid path"}, r.json()
+
+
+def test_source__traversal_absolute_path_400(simple_graph, tmp_path):
+    """GET /api/source?file=/etc/passwd → 400 (absolute path escapes scan_root)."""
+    r = _client(simple_graph, tmp_path, scan_root=tmp_path).get(
+        "/api/source", params={"file": "/etc/passwd"},
+        headers=_hdr(host=f"127.0.0.1:{PORT}"),
+    )
+    assert r.status_code == 400, r.status_code
+
+
+def test_source__traversal_deep_nested_400(simple_graph, tmp_path):
+    """GET /api/source?file=a/../../../etc/passwd → 400."""
+    r = _client(simple_graph, tmp_path, scan_root=tmp_path).get(
+        "/api/source", params={"file": "a/../../../etc/passwd"},
+        headers=_hdr(host=f"127.0.0.1:{PORT}"),
+    )
+    assert r.status_code == 400, r.status_code
+
+
+def test_source__credential_in_subdir_blocked_404(simple_graph, tmp_path):
+    """Credential file in subdirectory (config/.env) also blocked."""
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / ".env").write_text("DB_PASSWORD=s3cr3t")
+    r = _client(simple_graph, tmp_path, scan_root=tmp_path).get(
+        "/api/source", params={"file": "config/.env"},
+        headers=_hdr(host=f"127.0.0.1:{PORT}"),
+    )
+    assert r.status_code == 404, r.status_code
+    assert "s3cr3t" not in r.text, r.text
+
+
+def test_build_ai_context__credential_plus_legit_mixed(simple_graph, tmp_path):
+    """Tagged [.env, a.py] → .env excluded with warning, a.py included."""
+    (tmp_path / ".env").write_text("SECRET=hunter2")
+    (tmp_path / "a.py").write_text("def foo():\n    return 42\n")
+    ctx, warns = build_ai_context([".env", "a.py"], simple_graph, tmp_path)
+    reasons = [w["reason"] for w in warns]
+    assert "credential_file_excluded" in reasons, warns
+    assert "hunter2" not in ctx, ctx
+    assert "def foo" in ctx, ctx
+
+
+def test_summary__deprecated_ignores_cache_path(simple_graph, tmp_path, ai_body):
+    """Deprecated /api/ai/summary must not read/write cache even with cache_path set."""
+    cache = tmp_path / "cache.json"
+    assert not cache.exists()
+    r = _client(simple_graph, tmp_path, scan_root=tmp_path).post(
+        "/api/ai/summary", json=ai_body,
+        headers=_hdr(host=f"127.0.0.1:{PORT}", origin=f"http://127.0.0.1:{PORT}"),
+    )
+    assert r.status_code == 200
+    assert r.json() == {"deprecated": True, "reason": "use /api/ai/chat"}
+    assert not cache.exists(), "deprecated endpoint must not create cache file"
+
+
+def test_chat__provider_empty_reply(simple_graph, tmp_path, monkeypatch):
+    """Provider returns empty string → enabled=True, reply='' (graceful, no crash)."""
+    class Fake:
+        name = "fake"
+        def chat(self, messages, context):
+            return ""
+    monkeypatch.setattr("graps.ai.provider.get_provider", lambda: Fake())
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    r = _client(simple_graph, tmp_path).post(
+        "/api/ai/chat", json={"message": "hi"},
+        headers=_hdr(host=f"127.0.0.1:{PORT}", origin=f"http://127.0.0.1:{PORT}"),
+    )
+    j = r.json()
+    assert j["enabled"] is True and j["reply"] == "", j
