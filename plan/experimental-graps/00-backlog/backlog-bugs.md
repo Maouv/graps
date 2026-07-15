@@ -12,4 +12,13 @@
 - **Fix options:**
   - **A:** Add `call_expression` query to TreeSitterParser → extract callee + line → `ParsedCall`. Medium effort, duplicates AST work.
   - **B (recommended):** Flip dispatch — ASTParser first for `.py`, TreeSitter for non-Python only. 1-line change, YAGNI, AST more accurate for Python.
-- **Status:** Open — pending fix decision.
+- **Status:** Fixed (commit `b323f3f`). Option B implemented.
+
+## BUG-0002: Symlink bypass in credential file check
+
+- **Reported:** 2026-07-15
+- **Severity:** Low — requires filesystem write access to create symlink
+- **Root cause:** `_is_credential_file(file)` checks query param string, not resolved `target.name`. Symlink `link.txt` → `.env` passes credential check (name is `link.txt`), file content served.
+- **Affected:** `graps/server/app.py` — `/api/source` endpoint, `build_ai_context`
+- **Fix:** Also check `_is_credential_file(target.name)` after `.resolve()`. 2-line change.
+- **Status:** Open — pending fix.
