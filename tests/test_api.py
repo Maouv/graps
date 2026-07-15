@@ -6,14 +6,14 @@ Phase 5: ``/api/ai/summary`` deprecated (keep route, return deprecation).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
-from graps.ai.provider import AIError
 from graps import storage
+from graps.ai.provider import AIError
 from graps.server.app import build_ai_context, create_app
-
-from pathlib import Path
 
 # --- fixtures & helpers -------------------------------------------------------
 
