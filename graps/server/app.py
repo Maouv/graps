@@ -79,6 +79,15 @@ class ChatRequest(BaseModel):
     history: list[dict[str, str]] = []
 
 
+class SettingsUpdate(BaseModel):
+    """Body untuk ``PUT /api/settings`` — whitelisted fields only."""
+
+    ai_enrichment: bool | None = None
+    overrides: dict[str, Any] | None = None
+    panel_widths: dict[str, int] | None = None
+    tabs: list[Any] | None = None
+
+
 # --- Credential file exclusion (Option C — user tidak intend share) ----------
 
 _CREDENTIAL_FILES = {
@@ -498,10 +507,16 @@ def create_app(
         if not target.exists() or not target.is_file():
             return JSONResponse({"error": "File not found"}, status_code=404)
 
+        # Security: credential files blocked at source endpoint too (FEAT-0020).
+        # 404 to avoid revealing existence — same as not-found.
+        if _is_credential_file(file):
+            return JSONResponse({"error": "File not found"}, status_code=404)
+
         try:
             raw = target.read_text(errors="replace")
-        except OSError as e:
-            return JSONResponse({"error": str(e)}, status_code=500)
+        except OSError:
+            # Security: never serialize OSError details (may contain absolute path).
+            return JSONResponse({"error": "Failed to read file"}, status_code=500)
 
         language = _language_for_suffix(target.suffix)
 
@@ -563,12 +578,6 @@ def create_app(
         if scan_root is None:
             return storage.default_settings()
         return storage.read_settings(scan_root)
-
-    class SettingsUpdate(BaseModel):
-        ai_enrichment: bool | None = None
-        overrides: dict[str, Any] | None = None
-        panel_widths: dict[str, int] | None = None
-        tabs: list[Any] | None = None
 
     @app.put("/api/settings")
     def put_settings(req: SettingsUpdate) -> Any:
@@ -783,6 +792,12 @@ if __name__ == "__main__":
             j = r.json()
             assert any(w["reason"] == "credential_file_excluded" for w in j["warnings"]), j
             assert "hunter2" not in _FakeOK.last_ctx, _FakeOK.last_ctx
+
+            # 8b. /api/source blocks credential files (TASK-0004 hardening).
+            r = client.get("/api/source", params={"file": ".env"},
+                           headers={"host": HOST_OK})
+            assert r.status_code == 404, r.status_code
+            assert "hunter2" not in r.text, r.text
 
             # 9. scan_root=None → context kosong (backward-compat).
             provider_module.get_provider = saved_get_provider  # clear mock

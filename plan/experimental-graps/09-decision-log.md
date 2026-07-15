@@ -2,6 +2,29 @@
 
 > **Summary Block:** SSoT seluruh keputusan penting project. Entri terbaru berada paling atas; detail capability/architecture tetap di SSoT terkait dan entri ini merekam keputusan, alasan, serta konsekuensinya.
 
+### DEC-0014: Move SettingsUpdate to module level
+- **Tanggal:** 2026-07-15
+- **Diputuskan oleh:** Freya (bug fix, within TASK-0004 scope)
+- **Konteks/Masalah:** `PUT /api/settings` was broken — returned 422 for all requests. `SettingsUpdate` (Pydantic model) was defined inside `create_app` closure. With `from __future__ import annotations` (PEP 563), FastAPI couldn't resolve the string annotation `"SettingsUpdate"` to the local class.
+- **Keputusan:** Move `SettingsUpdate` to module level, alongside `SummaryRequest` and `ChatRequest`.
+- **Alasan:** Other request models (`SummaryRequest`, `ChatRequest`) are module-level and work correctly. Consistent pattern.
+- **Dampak/Konsekuensi:** `PUT /api/settings` now works. Unknown keys silently dropped by Pydantic (extra='ignore') + storage whitelist. No behavior change to existing endpoints.
+- **Terkait:** TASK-0004, `api-security.md`.
+
+---
+
+### DEC-0013: Block credential files at /api/source
+- **Tanggal:** 2026-07-15
+- **Diputuskan oleh:** Maou
+- **Konteks/Masalah:** `GET /api/source?file=.env` could return credential file contents. The api-security contract only required credential exclusion from AI context (`build_ai_context`), not from the source endpoint.
+- **Opsi yang dipertimbangkan:** (1) block at /api/source too, (2) leave as plan — AI context only, (3) block + return 404.
+- **Keputusan:** Block credential files at `/api/source` — return 404 (treat as not found, don't reveal existence).
+- **Alasan:** Defense in depth. Credential files should not be accessible via any endpoint, not just AI context.
+- **Dampak/Konsekuensi:** `_is_credential_file()` check added to `get_source` after existence check, before read. All credential file types (`.env*`, `credentials.json`, `secrets.json`, `.pem`, `.key`, `.p12`, `.pfx`) blocked. `api-security.md` contract extended.
+- **Terkait:** TASK-0004, FEAT-0020, `api-security.md`.
+
+---
+
 ### DEC-0012: Use full Plan-OS project instance
 - **Tanggal:** 2026-07-14
 - **Diputuskan oleh:** Maou

@@ -13,6 +13,8 @@ from graps.ai.provider import AIError
 from graps import storage
 from graps.server.app import build_ai_context, create_app
 
+from pathlib import Path
+
 # --- fixtures & helpers -------------------------------------------------------
 
 PORT = 8765
@@ -497,3 +499,163 @@ def test_build_ai_context__file_not_in_graph_warning(simple_graph, tmp_path):
     (tmp_path / "unknown.py").write_text("x = 1")
     ctx, warns = build_ai_context(["unknown.py"], simple_graph, tmp_path)
     assert any(w["reason"] == "file_not_in_graph" for w in warns), warns
+
+
+# --- /api/source hardening (TASK-0004) ----------------------------------------
+
+
+def test_source__credential_file_blocked_404(simple_graph, tmp_path):
+    """GET /api/source?file=.env → 404 (credential files blocked, not leaked)."""
+    (tmp_path / ".env").write_text("SECRET=hunter2")
+    r = _client(simple_graph, tmp_path, scan_root=tmp_path).get(
+        "/api/source", params={"file": ".env"},
+        headers=_hdr(host=f"127.0.0.1:{PORT}"),
+    )
+    assert r.status_code == 404, r.status_code
+    assert "hunter2" not in r.text, r.text
+
+
+def test_source__credential_ext_blocked_404(simple_graph, tmp_path):
+    """Credential extensions (.pem, .key) also blocked."""
+    (tmp_path / "server.pem").write_text("PRIVATE KEY DATA")
+    r = _client(simple_graph, tmp_path, scan_root=tmp_path).get(
+        "/api/source", params={"file": "server.pem"},
+        headers=_hdr(host=f"127.0.0.1:{PORT}"),
+    )
+    assert r.status_code == 404, r.status_code
+
+
+def test_source__read_error_no_path_leak(simple_graph, tmp_path, monkeypatch):
+    """500 on read failure must not serialize OSError (absolute path leak)."""
+    (tmp_path / "a.py").write_text("def foo(): pass")
+
+    real_read = Path.read_text
+    def _boom(self, *a, **kw):
+        if self.suffix == ".py":
+            raise OSError(13, "Permission denied", str(self))
+        return real_read(self, *a, **kw)
+
+    monkeypatch.setattr(Path, "read_text", _boom)
+    r = _client(simple_graph, tmp_path, scan_root=tmp_path).get(
+        "/api/source", params={"file": "a.py"},
+        headers=_hdr(host=f"127.0.0.1:{PORT}"),
+    )
+    assert r.status_code == 500, r.status_code
+    assert str(tmp_path) not in r.text, r.text
+    assert "Permission" not in r.text, r.text
+    assert r.json() == {"error": "Failed to read file"}, r.json()
+
+
+# --- /api/modules, /api/flows, /api/settings, /api/scan (TASK-0004) ------------
+
+
+_GRAPH_WITH_MODULES_FLOWS = {
+    "schema_version": "1.0.0",
+    "scan": {"file_count": 2, "function_count": 2, "edge_count": 0, "diagnostics": []},
+    "content_hash": "",
+    "nodes": {
+        "files": [
+            {"id": "a.py", "type": "file", "path": "a.py", "language": "python",
+             "module_id": "mod_a", "modified_at": "", "constants": [], "exported_names": []},
+            {"id": "b.py", "type": "file", "path": "b.py", "language": "python",
+             "module_id": "mod_b", "modified_at": "", "constants": [], "exported_names": []},
+        ],
+        "functions": [
+            {"id": "a.py::foo", "type": "function", "file_id": "a.py", "module_id": "mod_a",
+             "name": "foo", "qualified_name": "foo", "line_start": 1, "line_end": 2,
+             "decorators": [], "is_private": False, "is_nested": False,
+             "is_property": False, "parent": None},
+            {"id": "b.py::bar", "type": "function", "file_id": "b.py", "module_id": "mod_b",
+             "name": "bar", "qualified_name": "bar", "line_start": 1, "line_end": 2,
+             "decorators": [], "is_private": False, "is_nested": False,
+             "is_property": False, "parent": None},
+        ],
+        "classes": [],
+        "modules": [
+            {"id": "mod_a", "type": "module", "name": "a", "file_id": "a.py"},
+            {"id": "mod_b", "type": "module", "name": "b", "file_id": "b.py"},
+        ],
+    },
+    "edges": {"imports": [], "calls": [], "contains": [], "module_depends": []},
+    "flows": [
+        {"id": "flow_1", "type": "call_sequence", "steps": [{"fn": "a.py::foo", "label": "call"}]},
+    ],
+}
+
+
+def test_modules__valid_returns_members():
+    r = _client(_GRAPH_WITH_MODULES_FLOWS, Path("/tmp")).get(
+        "/api/modules/mod_a", headers=_hdr(host=f"127.0.0.1:{PORT}"))
+    assert r.status_code == 200, r.status_code
+    j = r.json()
+    assert j["id"] == "mod_a"
+    assert "a.py" in j["member_files"]
+    assert "a.py::foo" in j["member_functions"]
+
+
+def test_modules__unknown_returns_404():
+    r = _client(_GRAPH_WITH_MODULES_FLOWS, Path("/tmp")).get(
+        "/api/modules/nonexistent", headers=_hdr(host=f"127.0.0.1:{PORT}"))
+    assert r.status_code == 404
+    assert r.json() == {"error": "Module not found"}
+
+
+def test_flows__valid_returns_flow():
+    r = _client(_GRAPH_WITH_MODULES_FLOWS, Path("/tmp")).get(
+        "/api/flows/flow_1", headers=_hdr(host=f"127.0.0.1:{PORT}"))
+    assert r.status_code == 200, r.status_code
+    assert r.json()["id"] == "flow_1"
+
+
+def test_flows__unknown_returns_404():
+    r = _client(_GRAPH_WITH_MODULES_FLOWS, Path("/tmp")).get(
+        "/api/flows/nope", headers=_hdr(host=f"127.0.0.1:{PORT}"))
+    assert r.status_code == 404
+    assert r.json() == {"error": "Flow not found"}
+
+
+def test_settings__get_returns_defaults_no_scan_root(simple_graph, tmp_path):
+    r = _client(simple_graph, tmp_path, scan_root=None).get(
+        "/api/settings", headers=_hdr(host=f"127.0.0.1:{PORT}"))
+    assert r.status_code == 200
+    j = r.json()
+    assert j["ai_enrichment"] is True  # default ON
+    assert j["panel_widths"]["dir"] == 280
+
+
+def test_settings__get_returns_stored(simple_graph, tmp_path):
+    storage.write_settings(tmp_path, {"ai_enrichment": False, "panel_widths": {"dir": 500}})
+    r = _client(simple_graph, tmp_path, scan_root=tmp_path).get(
+        "/api/settings", headers=_hdr(host=f"127.0.0.1:{PORT}"))
+    assert r.status_code == 200
+    j = r.json()
+    assert j["ai_enrichment"] is False
+    assert j["panel_widths"]["dir"] == 500
+
+
+def test_settings__put_whitelist_drops_unknown(simple_graph, tmp_path):
+    r = _client(simple_graph, tmp_path, scan_root=tmp_path).put(
+        "/api/settings",
+        json={"ai_enrichment": False, "evil_key": "drop_me"},
+        headers=_hdr(host=f"127.0.0.1:{PORT}", origin=f"http://127.0.0.1:{PORT}"))
+    assert r.status_code == 200
+    j = r.json()
+    assert j["ai_enrichment"] is False
+    assert "evil_key" not in j, "unknown key must be dropped"
+
+
+def test_settings__put_csrf_rejected(simple_graph, tmp_path):
+    r = _client(simple_graph, tmp_path, scan_root=tmp_path).put(
+        "/api/settings",
+        json={"ai_enrichment": True},
+        headers=_hdr(host=f"127.0.0.1:{PORT}", origin="http://evil.com"))
+    assert r.status_code == 403
+
+
+def test_scan_status__returns_metadata(simple_graph, tmp_path):
+    r = _client(simple_graph, tmp_path).get(
+        "/api/scan/status", headers=_hdr(host=f"127.0.0.1:{PORT}"))
+    assert r.status_code == 200
+    j = r.json()
+    assert "file_count" in j
+    assert j["file_count"] == 1

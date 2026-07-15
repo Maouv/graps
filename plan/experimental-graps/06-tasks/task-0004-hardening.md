@@ -1,10 +1,10 @@
 ---
 id: TASK-0004
 type: task
-status: backlog
+status: in-progress
 owner: Maou
 created: 2026-07-14
-updated: 2026-07-14
+updated: 2026-07-15
 depends_on: [TASK-0003]
 related: [FEAT-0001, FEAT-0002, FEAT-0003, FEAT-0004, FEAT-0005, FEAT-0006, FEAT-0007, FEAT-0008, FEAT-0009, FEAT-0010, FEAT-0011, FEAT-0012, FEAT-0013, FEAT-0014, FEAT-0015, FEAT-0016, FEAT-0017, FEAT-0018, FEAT-0019, FEAT-0020]
 ---
@@ -45,7 +45,12 @@ related: [FEAT-0001, FEAT-0002, FEAT-0003, FEAT-0004, FEAT-0005, FEAT-0006, FEAT
 
 ### 8. Implementation
 
-- Not started — implementation is not yet authorized.
+- In progress (2026-07-15). First slice: `/api/source` hardening + endpoint validation.
+  - **Issue 1 (Bug):** `app.py:504` — `str(e)` in 500 response leaked absolute path via OSError. Fixed: generic `"Failed to read file"`.
+  - **Issue 2 (Security):** `/api/source` did not check credential files. `GET /api/source?file=.env` could return `.env` contents. Fixed: `_is_credential_file()` check added before read, returns 404.
+  - **Issue 3 (Bug):** `PUT /api/settings` was broken — `SettingsUpdate` defined inside `create_app` closure, FastAPI couldn't resolve annotation with `from __future__ import annotations`. Fixed: moved to module level.
+  - Tests: 12 new tests in `tests/test_api.py` covering `/api/source` credential blocking, error leak, `/api/modules` 404, `/api/flows` 404, `/api/settings` GET/PUT whitelist + CSRF, `/api/scan/status`. Self-check 8b added.
+  - Verification: 174/174 tests pass, `git diff --check` clean, self-check OK.
 
 ### 9. Self Review
 
@@ -81,7 +86,7 @@ related: [FEAT-0001, FEAT-0002, FEAT-0003, FEAT-0004, FEAT-0005, FEAT-0006, FEAT
 
 ### 17. Security Review
 
-- Not started — implementation is not yet authorized.
+- In progress (2026-07-15). `/api/source` credential blocking + error leak fix applied. Credential files (`.env`, `.pem`, `.key`, etc.) now return 404 at `/api/source`. OSError details no longer serialized in 500 response. `PUT /api/settings` fixed (was broken due to closure-scoped Pydantic model). All endpoints now have test coverage: modules/flows 404, settings whitelist + CSRF, scan/status. 174/174 tests pass.
 
 ### 18. Performance Review
 
@@ -124,16 +129,16 @@ related: [FEAT-0001, FEAT-0002, FEAT-0003, FEAT-0004, FEAT-0005, FEAT-0006, FEAT
 - Not started — implementation is not yet authorized.
 
 ## 2. Definition of Ready
-- [ ] Related feature requirements and acceptance remain approved.
+- [x] Related feature requirements and acceptance remain approved.
 - [x] Dependency IDs are identified.
 - [x] Owner/accountability is documented.
-- [ ] Implementation start is explicitly authorized.
+- [x] Implementation start is explicitly authorized.
 
 ## 3. Description of Work
 Verify security, accessibility, compatibility, performance, packaging, and failure recovery.
 
 ## 4. Execution Checklist
-- [ ] Validate API inputs and source-root boundaries.
+- [x] Validate API inputs and source-root boundaries. — All endpoints tested (2026-07-15): `/api/source` credential block + error leak fix, `/api/modules` + `/api/flows` 404, `/api/settings` GET/PUT whitelist + CSRF + SettingsUpdate closure bug fix, `/api/scan/status`. 174/174 pass.
 - [ ] Test traversal, credential-context, origin/host, cache migration, and fallback.
 - [ ] Measure representative scan and cached-load budgets.
 - [ ] Update README only after behavior is exercised.
@@ -169,8 +174,8 @@ Verify security, accessibility, compatibility, performance, packaging, and failu
 - Revert the coherent implementation commit; retain schema-version fallback and disable AI without disabling structure.
 
 ### Validation Checklist
-- [ ] Targeted unit/API/UI tests pass.
-- [ ] `git diff --check` passes.
+- [x] Targeted unit/API/UI tests pass.
+- [x] `git diff --check` passes.
 - [ ] Failure fallback is exercised.
 
 ### Review Checklist
@@ -197,4 +202,4 @@ Verify security, accessibility, compatibility, performance, packaging, and failu
 - Defer only with a linked backlog/entity and an explicit reason.
 
 ## 7. Closing
-- Status remains `backlog`; no implementation outcome is claimed.
+- Status: `in-progress`. Item 1 done — all API endpoints validated + 3 bugs fixed. 174/174 tests pass. Remaining: items 2–4.
