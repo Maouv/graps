@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="color-scheme" content="dark">
+  <title>graps</title>
+  <link rel="stylesheet" href="/app.css">
+  <link rel="icon" type="image/svg+xml" href="/icon/package.svg">
+</head>
+<body>
+
+<!-- Inline SVG sprite — Codicons only, fill=currentColor, no CDN (FEAT-0005/0008).
+     Custom split icons are separate <img> files with fixed colors. -->
+<svg class="sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-chevron" viewBox="0 0 16 16"><path d="M6.146 3.146a.5.5 0 0 1 .708 0L11.354 7.646a.5.5 0 0 1 0 .708L6.854 12.854a.5.5 0 0 1-.708-.708L10.293 8 6.146 3.854a.5.5 0 0 1 0-.708Z"/></symbol>
+  <symbol id="i-file" viewBox="0 0 16 16"><path d="M13.56 4.35L10.65 1.44C10.368 1.16 9.987 1.002 9.59 1H6c-.53.002-1.038.213-1.413.588S4.002 2.47 4 3v5.83c.281.073.537.222.74.43.107.1.195.219.26.35V3c0-.265.105-.52.293-.707C5.48 2.105 5.735 2 6 2h3v2.5c0 .398.158.78.439 1.061S9.602 6 10 6h2.5v7c0 .265-.105.52-.293.707S11.765 14 11.5 14h-.02l-1.012 1H11.5c.53-.002 1.038-.213 1.413-.588S13.998 13.53 14 13V5.41a1.99 1.99 0 0 0-.44-1.06zM10.5 5a.5.5 0 0 1-.5-.5V2.21L12.79 5H10.5z"/><path d="M3.478 14.978a.5.5 0 0 1-.353-.147L1.146 12.854a.5.5 0 0 1 0-.708L3.146 10.146a.5.5 0 1 1 .708.708L2.207 12.5l1.625 1.624a.5.5 0 0 1-.354.854z"/><path d="M7.522 14.978a.5.5 0 0 1-.354-.853L8.793 12.5 7.146 10.854a.5.5 0 1 1 .708-.708l2 2a.5.5 0 0 1 0 .708L7.875 14.831a.5.5 0 0 1-.353.147z"/></symbol>
+  <symbol id="i-fn" viewBox="0 0 16 16"><path d="M4.697 5.04a.5.5 0 0 0-.262.953L7.5 7.33v3.17a.5.5 0 0 0 1 0V7.33l3.065-1.337a.5.5 0 1 0-.393-.921L8 6.456 4.697 5.04zM9.077 1.379a4.026 4.026 0 0 0-2.154 0L1.962 3.287A2.013 2.013 0 0 0 1 4.687v6.626c0 .62.382 1.177.962 1.4l4.961 1.908a4.026 4.026 0 0 0 2.154 0l4.961-1.908A2.013 2.013 0 0 0 15 11.313V4.687a2.013 2.013 0 0 0-.962-1.4L9.077 1.379zM7.282 2.312a3.026 3.026 0 0 1 1.436 0L13.68 4.22c.193.074.32.26.32.467v6.626c0 .207-.127.393-.32.467L8.718 13.688a3.026 3.026 0 0 1-1.436 0L2.32 11.78c-.193-.074-.32-.26-.32-.467V4.687c0-.207.127-.393.32-.467l4.962-1.908z"/></symbol>
+  <symbol id="i-module" viewBox="0 0 16 16"><path d="M14.039 3.286L9.077 1.378a4.026 4.026 0 0 0-2.154 0L1.962 3.286A2.013 2.013 0 0 0 1 4.686v6.626c0 .62.382 1.177.962 1.4l4.961 1.908a4.026 4.026 0 0 0 2.154 0l4.961-1.908A2.013 2.013 0 0 0 15 11.312V4.686a2.013 2.013 0 0 0-.961-1.4zM7.282 2.311a3.026 3.026 0 0 1 1.436 0L13.436 4.126 8 6.456 2.564 4.126l4.718-1.815zM2 4.971l5.5 2.357v6.429a3.034 3.034 0 0 1-.782-.234L2.32 11.779A.5.5 0 0 1 2 11.312V4.971zm12 6.341a.5.5 0 0 1-.32.467l-4.962 1.908A3.034 3.034 0 0 1 8 13.757V7.329l6-2.357v6.34z"/></symbol>
+  <symbol id="i-close" viewBox="0 0 16 16"><path d="M8.707 8L12.353 4.354a.5.5 0 0 0-.707-.707L8 7.293 4.354 3.647a.5.5 0 1 0-.707.707L7.293 8l-3.646 3.646a.5.5 0 0 0 .707.707L8 8.707l3.646 3.646a.5.5 0 0 0 .707-.707L8.707 8z"/></symbol>
+  <symbol id="i-sync" viewBox="0 0 16 16"><path d="M14 3.5V6.5a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1 0-1h2.08A5.003 5.003 0 0 0 8 3C5.78 3 3.8 4.5 3.19 6.64a.5.5 0 0 1-.96-.28C2.96 3.79 5.33 2 8 2c2.05 0 3.91 1.02 5 2.69V3.5a.5.5 0 0 1 1 0zm-.58 5.52a.5.5 0 0 0-.62.33C12.19 11.51 10.22 13 8 13c-2.02 0-3.79-1.17-4.59-3H5.5a.5.5 0 0 0 0-1h-3a.5.5 0 0 0-.5.5v3a.5.5 0 0 0 1 0v-1.19A6.015 6.015 0 0 0 8 14c2.67 0 5.04-1.79 5.76-4.36a.5.5 0 0 0-.34-.62z"/></symbol>
+</svg>
+
+<div id="app" class="app">
+
+  <!-- LEFT: dir-panel — explorer tree (FEAT-0002/0008/0009) -->
+  <aside id="dir-panel" class="panel dir-panel" data-open="true">
+    <header class="panel-header">
+      <h2 class="panel-title">Explorer</h2>
+      <button class="icon-btn panel-close" data-panel="dir" aria-label="Close explorer panel">
+        <svg class="icon"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <div class="panel-body tree" id="tree" role="tree" aria-label="Project structure">
+      <p class="empty-state">Loading…</p>
+    </div>
+  </aside>
+
+  <!-- Left resizer (FEAT-0006) -->
+  <div class="resizer" id="resizer-left" role="separator"
+       aria-orientation="vertical" aria-label="Resize explorer panel" tabindex="0"></div>
+
+  <!-- CENTER: workspace — source/flow/module tabs (FEAT-0003/0010/0011/0012/0013) -->
+  <main id="workspace" class="workspace">
+    <div class="workspace-toolbar">
+      <div class="tab-bar" id="tab-bar" role="tablist" aria-label="Open tabs">
+        <span class="tab-empty">No tabs open</span>
+      </div>
+      <div class="split-actions">
+        <!-- Left split: mirror of right custom SVG via CSS (FEAT-0005) -->
+        <button class="icon-btn split-btn" data-panel="dir" aria-pressed="true"
+                aria-label="Toggle explorer panel">
+          <img src="/icon/split-horizontal-right-select.svg" alt=""
+               class="split-img split-mirror" data-state="select">
+        </button>
+        <!-- Right split: custom SVG source asset (FEAT-0005) -->
+        <button class="icon-btn split-btn" data-panel="ai" aria-pressed="true"
+                aria-label="Toggle AI panel">
+          <img src="/icon/split-horizontal-right-select.svg" alt=""
+               class="split-img" data-state="select">
+        </button>
+      </div>
+    </div>
+    <div class="tab-content" id="tab-content">
+      <div class="workspace-empty" id="workspace-empty">
+        <svg class="empty-icon"><use href="#i-module"/></svg>
+        <p>Select a file, function, or module from the explorer.</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- Right resizer (FEAT-0006) -->
+  <div class="resizer" id="resizer-right" role="separator"
+       aria-orientation="vertical" aria-label="Resize AI panel" tabindex="0"></div>
+
+  <!-- RIGHT: ai-panel — status + input (FEAT-0004/0014/0015) -->
+  <aside id="ai-panel" class="panel ai-panel" data-open="true">
+    <header class="panel-header">
+      <h2 class="panel-title">AI</h2>
+      <span class="ai-status-dot" id="ai-status-dot" title="AI status"></span>
+      <button class="icon-btn panel-close" data-panel="ai" aria-label="Close AI panel">
+        <svg class="icon"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <div class="ai-body">
+      <div class="ai-status-text" id="ai-status-text" aria-live="polite">Checking…</div>
+      <div class="ai-messages" id="ai-messages" aria-live="polite" aria-atomic="false"></div>
+      <div class="ai-input-bar">
+        <input type="text" id="ai-input" placeholder="Ask or /scan…"
+               aria-label="AI input" autocomplete="off" spellcheck="false">
+        <button id="ai-send" class="icon-btn" aria-label="Send">
+          <svg class="icon"><use href="#i-sync"/></svg>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Mobile overlay backdrop -->
+  <div class="backdrop" id="backdrop" hidden></div>
+
+</div>
+
+<script src="/app.js" defer></script>
+</body>
+</html>

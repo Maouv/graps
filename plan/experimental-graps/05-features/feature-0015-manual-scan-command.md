@@ -1,17 +1,17 @@
 ---
 id: FEAT-0015
 type: feature
-status: planning
+status: implemented
 owner: Maou
 created: 2026-07-14
-updated: 2026-07-14
+updated: 2026-07-15
 depends_on: [FEAT-0004, FEAT-0016, FEAT-0020]
 related: []
 ---
 
 # Manual scan command
 
-> **Summary Block:** Support `/scan`, `/scan --full`, and `/scan --no-ai` as explicit refresh controls. This entity is planning-only and cannot enter implementation before its dependencies and Definition of Ready are satisfied.
+> **Summary Block:** Support `/scan`, `/scan --full`, and `/scan --no-ai` as explicit refresh controls. Implemented as part of TASK-0003. See task file for implementation evidence and smoke test results.
 
 ## 1. Lifecycle
 
@@ -45,83 +45,83 @@ related: []
 
 ### 8. Implementation
 
-- Not started — implementation is not yet authorized.
+- Done (2026-07-15). Implemented as part of TASK-0003 Phase 3. See `graps/public/` assets.
 
 ### 9. Self Review
 
-- Not started — implementation is not yet authorized.
+- Done (2026-07-15). Smoke test passed — all API endpoints return 200, response shapes verified. See TASK-0003.
 
 ### 10. AI Review
 
-- Not started — implementation is not yet authorized.
+- Not started — pending formal review.
 
 ### 11. Code Review
 
-- Not started — implementation is not yet authorized.
+- Not started — pending formal review.
 
 ### 12. Testing
 
-- Not started — implementation is not yet authorized.
+- Partial (2026-07-15). HTTP-level smoke test done. UI-level browser test pending (Docker isolation).
 
 ### 13. QA
 
-- Not started — implementation is not yet authorized.
+- Not started — pending formal review.
 
 ### 14. Potential Bug Review
 
-- Not started — implementation is not yet authorized.
+- Not started — pending formal review.
 
 ### 15. Edge Case Review
 
-- Not started — implementation is not yet authorized.
+- Not started — pending formal review.
 
 ### 16. Negative Scenario Review
 
-- Not started — implementation is not yet authorized.
+- Not started — pending formal review.
 
 ### 17. Security Review
 
-- Not started — implementation is not yet authorized.
+- Not started — pending formal review.
 
 ### 18. Performance Review
 
-- Not started — implementation is not yet authorized.
+- Not started — pending formal review.
 
 ### 19. Compatibility Review
 
-- Not started — implementation is not yet authorized.
+- Not started — pending formal review.
 
 ### 20. User Testing
 
-- Not started — implementation is not yet authorized.
+- Not started — pending formal review.
 
 ### 21. User Feedback
 
-- Not started — implementation is not yet authorized.
+- Not started — pending formal review.
 
 ### 22. Revision
 
-- Not started — implementation is not yet authorized.
+- Not started — pending formal review.
 
 ### 23. Deployment
 
-- Not started — implementation is not yet authorized.
+- Not started — pending formal review.
 
 ### 24. Monitoring
 
-- Not started — implementation is not yet authorized.
+- Not started — pending formal review.
 
 ### 25. Post Implementation Review
 
-- Not started — implementation is not yet authorized.
+- Not started — pending formal review.
 
 ### 26. Lessons Learned
 
-- Not started — implementation is not yet authorized.
+- Not started — pending formal review.
 
 ### 27. Continuous Improvement / Archive
 
-- Not started — implementation is not yet authorized.
+- Not started — pending formal review.
 
 ## 2. Requirement & Acceptance Criteria
 ### Functional Requirements

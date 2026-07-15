@@ -30,6 +30,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # ponytail: dipanggil sebagai `python graps/server/app.py` (self-check) butuh
@@ -605,6 +606,14 @@ def create_app(
         if flow is None:
             return JSONResponse({"error": "Flow not found"}, status_code=404)
         return flow
+
+    # --- Static frontend (FEAT-0001 shell) ---------------------------------
+    # ponytail: mount public/ at root. API routes registered above take
+    # precedence (checked first). StaticFiles(html=True) serves index.html
+    # at GET / and other assets at their paths. No CDN, no build step.
+    _public = Path(__file__).resolve().parent.parent / "public"
+    if _public.is_dir():
+        app.mount("/", StaticFiles(directory=str(_public), html=True), name="public")
 
     return app
 
