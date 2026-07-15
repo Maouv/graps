@@ -1,23 +1,24 @@
 ---
 id: PROJ-0001
 type: project-index
-status: planning
+status: done
 owner: Maou
 created: 2026-07-14
-updated: 2026-07-14
+updated: 2026-07-15
 depends_on: []
 related: []
 ---
 
 # Experimental Graps — Project Index
 
-> **Summary Block:** Sumber masuk tunggal untuk full project instance Experimental Graps. Project membangun ulang Graps sebagai code architecture explorer dengan structural analysis sebagai sumber kebenaran dan AI sebagai enrichment opsional. Status sekarang Planning & Design; dokumen ini tidak mengotorisasi dependency installation atau perubahan source.
+> **Summary Block:** Sumber masuk tunggal untuk full project instance Experimental Graps. Project membangun ulang Graps sebagai code architecture explorer dengan structural analysis sebagai sumber kebenaran dan AI sebagai enrichment opsional. Status: Done. 4/4 tasks complete, 181 tests pass, ruff+mypy clean. 2 features deferred to backlog (FEAT-0018, FEAT-0019). Stages 20-27 (user testing → archive) pending deployment.
 
 ## Status
-- **Lifecycle:** Planning & Design.
+- **Lifecycle:** Implementation complete. Done.
 - **Branch:** `experimental`.
 - **Owner:** Maou.
-- **Implementation authorization:** belum diberikan.
+- **Implementation authorization:** Given. All 4 tasks done (2026-07-15).
+- **Deferred:** FEAT-0018 (multi-language module resolution), FEAT-0019 (enrichment rejection pipeline). See backlog.
 
 ## Navigation
 - [Backlog](00-backlog/00-INDEX.md)
