@@ -1,7 +1,7 @@
 ---
 id: FEAT-0004
 type: feature
-status: implemented
+status: review
 owner: Maou
 created: 2026-07-14
 updated: 2026-07-15
@@ -178,12 +178,12 @@ related: []
 ### Validation Checklist
 
 - [ ] Targeted unit/API/UI tests pass.
-- [ ] `git diff --check` passes.
+- [x] `git diff --check` passes.
 - [ ] Failure fallback is exercised.
 
 ### Review Checklist
 
-- [ ] Self Review
+- [x] Self Review
 - [ ] AI Review
 - [ ] Code Review
 - [ ] Security Review
@@ -213,4 +213,4 @@ related: []
 - Defer only with a linked backlog/entity and an explicit reason.
 
 ## 7. Closing
-- Status remains `planning`; PIR, lessons, and archive decision must be evidence-backed.
+- Status: `review`. Implementation done (TASK-0003), self-review passed, formal review pending.

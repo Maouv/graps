@@ -1,7 +1,7 @@
 ---
 id: TASK-0003
 type: task
-status: in_progress
+status: in-progress
 owner: Maou
 created: 2026-07-14
 updated: 2026-07-15
@@ -224,4 +224,4 @@ Build the required three-panel explorer and exact interaction contracts over sta
 - Add CSRF token mechanism beyond Origin-only check.
 
 ## 7. Closing
-- Status: `in_progress`. Implementation complete, self-review done, formal reviews pending.
+- Status: `in-progress`. Implementation complete, self-review done, formal reviews pending.
