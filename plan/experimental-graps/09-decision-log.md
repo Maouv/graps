@@ -2,6 +2,18 @@
 
 > **Summary Block:** SSoT seluruh keputusan penting project. Entri terbaru berada paling atas; detail capability/architecture tetap di SSoT terkait dan entri ini merekam keputusan, alasan, serta konsekuensinya.
 
+### DEC-0017: Tree uses folder/file/function hierarchy without module nodes (Option B)
+- **Tanggal:** 2026-07-16
+- **Diputuskan oleh:** Maou (user decision, REF-0006)
+- **Konteks/Masalah:** REF-0006 planned folder→module→file→function tree keeping modules as intermediate level. Investigation revealed scanner (`resolve_modules`) creates 1 module node per source file (137 files = 137 modules), not 1 per package. Applying the plan literally would wrap every file in its own module node — more verbose than the current flat tree, opposite of issue.md violation #3's goal ("the problem its to verbose").
+- **Opsi yang dipertimbangkan:** (A) Follow plan literally — folder→module-per-file→file→fn, 137 redundant wrappers, defeats issue.md goal. (B) Drop module nodes — folder→file→fn, matches issue.md exactly, FEAT-0012 module tabs become unreachable from tree. (C) Regroup files by package module — matches plan's example, needs new grouping logic not in plan, most complex.
+- **Keputusan:** Option B — folder/file/function trie from file paths, no module nodes. Module-overview tab code (`renderModule()`) preserved for re-wiring later.
+- **Alasan:** Laziest fix achieving issue.md's goal. Scanner's 1-module-per-file model makes module nodes redundant in tree display. Modules are a scanner concept, not a tree-display concept.
+- **Dampak/Konsekuensi:** FEAT-0012 module-overview tabs unreachable from tree UI until re-wired (e.g., via search/command palette). `buildTreeData()` rewritten, `renderNode()` icon map adds folder (null = no icon), `onNodeClick()` folder early-return.
+- **Terkait:** REF-0006, issue.md violation #3, FEAT-0008/0009, FEAT-0012 (regression — known).
+
+---
+
 ### DEC-0016: Replace crypto.randomUUID with uid() fallback for non-secure context
 - **Tanggal:** 2026-07-16
 - **Diputuskan oleh:** Freya (bug fix, BUG-0004)

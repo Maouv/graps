@@ -42,16 +42,12 @@ const iconSvg = (id) => `<svg class="icon"><use href="#${id}"/></svg>`;
 const uid = () => crypto.randomUUID?.() ?? (Date.now().toString(36) + Math.random().toString(36).slice(2));
 
 /* --- Tree (FEAT-0008/0009) ----------------------------------------------- */
+// ponytail: Option B — folder/file/function trie from file paths. No module
+// nodes (scanner makes 1 module per file → would add redundant wrapper per file).
+// Module-overview tabs (FEAT-0012) become unreachable from tree; re-wire later.
 function buildTreeData(graph) {
-  const filesByMod = {};
   const fnsByFile = {};
-  for (const f of graph.nodes.files) {
-    const mid = f.module_id || '__root__';
-    (filesByMod[mid] ||= []).push(f);
-  }
-  for (const fn of graph.nodes.functions) {
-    (fnsByFile[fn.file_id] ||= []).push(fn);
-  }
+  for (const fn of graph.nodes.functions) (fnsByFile[fn.file_id] ||= []).push(fn);
   const mkFn = (fn) => ({
     type: 'function', id: fn.id, label: fn.name, data: fn, children: [],
   });
@@ -60,20 +56,30 @@ function buildTreeData(graph) {
     children: (fnsByFile[f.id] || []).sort((a, b) =>
       (a.line_start || 0) - (b.line_start || 0)).map(mkFn),
   });
-  const tree = [];
-  for (const m of (graph.nodes.modules || [])) {
-    tree.push({
-      type: 'module', id: m.id, label: m.name || m.id, data: m,
-      children: (filesByMod[m.id] || []).sort((a, b) =>
-        a.path.localeCompare(b.path)).map(mkFile),
-    });
+  // folder trie from file paths (last segment = filename)
+  const root = { children: [] };
+  for (const f of graph.nodes.files) {
+    if (!f.path) continue;  // guard: skip empty paths
+    const segs = f.path.split('/');
+    let cur = root;
+    for (let i = 0; i < segs.length - 1; i++) {
+      let folder = cur.children.find(c => c.type === 'folder' && c.label === segs[i]);
+      if (!folder) {
+        folder = { type: 'folder', id: segs.slice(0, i + 1).join('/'), label: segs[i], children: [] };
+        cur.children.push(folder);
+      }
+      cur = folder;
+    }
+    cur.children.push(mkFile(f));
   }
-  // orphan files (no module)
-  for (const f of (filesByMod['__root__'] || []).sort((a, b) =>
-    a.path.localeCompare(b.path))) {
-    tree.push(mkFile(f));
-  }
-  return tree;
+  // sort: folders first, then files; alphabetical within group
+  const order = { folder: 0, file: 1, function: 2 };
+  (function sort(nodes) {
+    nodes.sort((a, b) => (order[a.type] ?? 9) - (order[b.type] ?? 9)
+      || a.label.localeCompare(b.label));
+    for (const n of nodes) if (n.children?.length) sort(n.children);
+  })(root.children);
+  return root.children;
 }
 
 function renderTree() {
@@ -89,7 +95,7 @@ function renderTree() {
 function renderNode(node, depth) {
   const expanded = state.expanded.has(node.id);
   const hasKids = node.children.length > 0;
-  const icons = { module: 'i-module', file: 'i-file', function: 'i-fn' };
+  const icons = { folder: null, module: 'i-module', file: 'i-file', function: 'i-fn' };
   // row
   const row = document.createElement('div');
   row.className = 'tree-row' + (expanded ? ' expanded' : '');
@@ -102,7 +108,7 @@ function renderNode(node, depth) {
   row.innerHTML =
     `<span class="tree-chevron${expanded ? ' expanded' : ''}${hasKids ? '' : ' leaf'}">` +
     (hasKids ? iconSvg('i-chevron') : '') + `</span>` +
-    iconSvg(icons[node.type]) +
+ (icons[node.type] ? iconSvg(icons[node.type]) : '') +
     `<span class="tree-label">${esc(node.label)}</span>`;
   // single vs double click (FEAT-0013)
   row.addEventListener('click', () => onNodeClick(node));
@@ -125,6 +131,8 @@ function renderNode(node, depth) {
 
 /* --- Click contract (FEAT-0002) ------------------------------------------ */
 function onNodeClick(node) {
+  // folders: expand/collapse immediately, no tab (no single-vs-double-click delay)
+  if (node.type === 'folder') { toggleExpand(node); return; }
   // FEAT-0013: single click reuses safe preview tab
   clearTimeout(state.pendingPreview);
   state.pendingPreview = setTimeout(() => {

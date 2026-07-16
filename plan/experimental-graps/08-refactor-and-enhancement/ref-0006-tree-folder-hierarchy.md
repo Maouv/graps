@@ -1,7 +1,7 @@
 ---
 id: REF-0006
 type: refactor
-status: reported
+status: review
 owner: Maou
 created: 2026-07-16
 updated: 2026-07-16
@@ -11,7 +11,7 @@ related: [BUG-0003, BUG-0004, REF-0007]
 
 # Tree structure — folder/module/file/function hierarchy from filesystem paths
 
-> **Summary Block:** `buildTreeData()` groups files by `module_id` producing a flat module→file→function tree. Refactor to build a folder hierarchy from file paths: `graps/` → `(module) graps.ai` → `provider.py` → `chat`. Modules kept as intermediate level (Option B). Fixes issue.md violation #3.
+> **Summary Block:** `buildTreeData()` groups files by `module_id` producing a flat module→file→function tree. Refactor to build a folder hierarchy from file paths: `graps/` → `ai/` → `provider.py` → `chat`. **Implementation: Option B** — folder/file/function trie, no module nodes (scanner makes 1 module per file → module wrapper per file would be redundant/verbose). Fixes issue.md violation #3.
 
 ## 1. Deskripsi Masalah / Tujuan Perubahan
 
@@ -25,234 +25,214 @@ graps.ai.provider      <- module node
     chat               <- function node
 ```
 
-**Target tree (folder hierarchy with modules):**
+**Target tree (folder hierarchy — Option B, no module nodes):**
 ```
-graps/                 <- folder node (folder.svg)
+graps/                 <- folder node
   ai/                  <- folder node
-    (module) graps.ai  <- module node (package.svg)
-      __init__.py      <- file node
-      cache.py         <- file node
-      provider.py      <- file node
-        chat           <- function node
-      validator.py     <- file node
-  cli.py               <- file node (top-level, no module parent)
+    __init__.py        <- file node
+    cache.py           <- file node
+    provider.py        <- file node
+      chat             <- function node
+    validator.py       <- file node
+  cli.py               <- file node (top-level, no module wrapper)
   storage.py           <- file node
 ```
 
-The tree should be built from **file paths** (filesystem structure), not from **module IDs** (dotted names). Modules are inserted as an intermediate level between the containing folder and its files.
+The tree is built from **file paths** (filesystem structure). Modules are a
+scanner concept, not a tree-display concept — they are omitted from the tree
+(Option B, user-approved 2026-07-16).
 
 ## 2. Root Cause Analysis
 
 **Why current is wrong:** `buildTreeData()` at lines 42–72 groups files by `module_id` into `filesByMod`, then iterates `graph.nodes.modules` to create module nodes at root level. Each module node's children are its files. This produces a flat list of modules, each with files as children — not a folder hierarchy.
 
-**Why it deviates from plan:** The early plan (`experimental-graps.md`) shows a tree with `(folder)` and `(module)` as distinct levels. Files live inside modules, modules live inside folders. The current implementation skips folders entirely — modules are the root level.
+**Why it deviates from plan:** The early plan (`experimental-graps.md`) shows a tree with `(folder)` and `(module)` as distinct levels. The current implementation skips folders entirely — modules are the root level.
 
-**Module placement logic:** Each module's `file_id` is a relative path (e.g., `graps/ai/provider.py`). The module's dotted ID (e.g., `graps.ai.provider`) maps to a path segment (`graps/ai/`). The module node should be placed as a child of the folder `graps/ai/`, and its member files as children of the module node.
+### Deviation found during investigation (2026-07-16)
 
-But some files don't belong to any module (e.g., `__init__.py`, non-Python files). These should be direct children of their containing folder, not under a module node.
+The original REF-0006 plan assumed modules group multiple files (e.g., one
+`graps.ai` module wrapping `__init__.py` + `cache.py` + `provider.py`). Probing
+`.graps/graph.json` revealed the scanner creates **1 module node per source
+file** (`resolve_modules()` in `modules.py`: "One module node per source file",
+each carrying `file_id`). `python_module_id()` returns a dotted name for ANY
+path — `HANDOFF.md` → `graps.ai.cache`, `.github/workflows/publish.yml` →
+`.github.workflows.publish.yml`.
 
-## 3. Proposed Fix / Change
+Data: 137 files = 137 modules, 0 module-per-file_id duplicates, 0 files with
+falsy module_id. Applying the plan's `modByFile[f.id]` logic would wrap EVERY
+file in its own module node — more verbose than the current flat tree, the
+opposite of issue.md's goal.
 
-### 3a. Rewrite `buildTreeData()`
+issue.md Note: "if you find any deviation between source code and plan ask the
+user." User chose **Option B** (drop module nodes from tree, folder→file→fn)
+over Option A (literal, verbose) and Option C (regroup by package, complex).
 
-Replace the current module-grouped approach with a path-based trie:
+## 3. Proposed Fix / Change — IMPLEMENTED (Option B)
+
+### 3a. Rewrite `buildTreeData()` — folder/file/function trie
+
+Build a folder trie from file paths. Last path segment = filename. Functions
+attached to files. No module nodes.
 
 ```js
 function buildTreeData(graph) {
-  const files = graph.nodes.files || [];
-  const fns = graph.nodes.functions || [];
-  const modules = graph.nodes.modules || [];
-
-  // Functions by file_id
   const fnsByFile = {};
-  for (const fn of fns) (fnsByFile[fn.file_id] ||= []).push(fn);
-
-  // Modules by file_id (module.file_id → module)
-  const modByFile = {};
-  for (const m of modules) modByFile[m.file_id] = m;
-
-  // Build folder/file/function trie from file paths
-  const root = { type: 'folder', id: '', label: '', children: [] };
-
-  for (const f of files) {
+  for (const fn of graph.nodes.functions) (fnsByFile[fn.file_id] ||= []).push(fn);
+  const mkFn = (fn) => ({ type: 'function', id: fn.id, label: fn.name, data: fn, children: [] });
+  const mkFile = (f) => ({
+    type: 'file', id: f.id, label: f.path.split('/').pop(), data: f,
+    children: (fnsByFile[f.id] || []).sort((a, b) => (a.line_start || 0) - (b.line_start || 0)).map(mkFn),
+  });
+  const root = { children: [] };
+  for (const f of graph.nodes.files) {
+    if (!f.path) continue;
     const segs = f.path.split('/');
-    const fileName = segs.pop();
-    const dirPath = segs.join('/');
-    const mod = modByFile[f.id];
-
-    // Navigate/create folder nodes for dirPath
     let cur = root;
-    let accum = '';
-    for (const seg of segs) {
-      accum = accum ? `${accum}/${seg}` : seg;
-      let child = cur.children.find(c => c.type === 'folder' && c.id === accum);
-      if (!child) {
-        child = { type: 'folder', id: accum, label: seg, children: [] };
-        cur.children.push(child);
-      }
-      cur = child;
+    for (let i = 0; i < segs.length - 1; i++) {
+      let folder = cur.children.find(c => c.type === 'folder' && c.label === segs[i]);
+      if (!folder) { folder = { type: 'folder', id: segs.slice(0, i + 1).join('/'), label: segs[i], children: [] }; cur.children.push(folder); }
+      cur = folder;
     }
-
-    // If file has a module, create module node (dedup by module_id)
-    if (mod) {
-      let modNode = cur.children.find(c => c.type === 'module' && c.id === mod.id);
-      if (!modNode) {
-        modNode = {
-          type: 'module', id: mod.id, label: mod.name || mod.id,
-          data: mod, children: [],
-        };
-        cur.children.push(modNode);
-      }
-      // Add file under module
-      modNode.children.push(makeFileNode(f, fnsByFile));
-    } else {
-      // No module — file goes directly under folder
-      cur.children.push(makeFileNode(f, fnsByFile));
-    }
+    cur.children.push(mkFile(f));
   }
-
-  // Sort: folders first, then modules, then files; alphabetical
-  const sortNodes = (nodes) => {
-    const order = { folder: 0, module: 1, file: 2, function: 3 };
-    nodes.sort((a, b) => (order[a.type] ?? 9) - (order[b.type] ?? 9)
-      || a.label.localeCompare(b.label));
-    for (const n of nodes) if (n.children?.length) sortNodes(n.children);
-  };
-  sortNodes(root.children);
+  const order = { folder: 0, file: 1, function: 2 };
+  (function sort(nodes) {
+    nodes.sort((a, b) => (order[a.type] ?? 9) - (order[b.type] ?? 9) || a.label.localeCompare(b.label));
+    for (const n of nodes) if (n.children?.length) sort(n.children);
+  })(root.children);
   return root.children;
 }
-
-function makeFileNode(f, fnsByFile) {
-  const fns = (fnsByFile[f.id] || []).sort((a, b) =>
-    (a.line_start || 0) - (b.line_start || 0));
-  return {
-    type: 'file', id: f.id, label: f.path.split('/').pop(),
-    data: f, children: fns.map(fn => ({
-      type: 'function', id: fn.id, label: fn.name,
-      data: fn, children: [],
-    })),
-  };
-}
 ```
 
-### 3b. Update `renderNode()` icon map
+### 3b. `renderNode()` icon map — folder gets no icon
 
-Add `folder` type:
+Folder nodes show chevron + label only (no separate icon — `i-folder` SVG
+belongs to REF-0008 icon refactor). Files use `i-file`, functions `i-fn`.
+Module type kept in map for safety (renderModule tab code still references it).
+
 ```js
-const icons = { folder: 'i-folder', module: 'i-module', file: 'i-file', function: 'i-fn' };
+const icons = { folder: null, module: 'i-module', file: 'i-file', function: 'i-fn' };
+// icon line guarded: (icons[node.type] ? iconSvg(icons[node.type]) : '')
 ```
 
-Note: actual SVG icons (`folder.svg`, `file.svg`) are installed in the icon refactor section. For now, `i-folder` can reuse the existing chevron or a placeholder.
+### 3c. `onNodeClick()` — folder toggles immediately
 
-### 3c. Update `onNodeClick()` / `onNodeDblClick()`
+Folders expand/collapse on click with no 200ms preview delay (no tab to open,
+no single-vs-double-click semantics).
 
-Add `folder` type handling:
 ```js
-if (node.type === 'folder') {
-  toggleExpand(node);
-  // no tab opened for folders
-}
+if (node.type === 'folder') { toggleExpand(node); return; }
 ```
 
-Module and file/function handlers stay the same.
+`onNodeKey()` unchanged — ArrowLeft/Right + Enter/Space already route through
+`toggleExpand`/`onNodeClick`, which now handle folders correctly.
 
-### 3d. CSS — folder type
+### 3d. CSS — deferred to REF-0007
 
-Add CSS rule for folder nodes (will be updated in REF-0007 to use `#E4E4E4`):
-```css
-.tree-row[data-type="folder"] .tree-label { color: var(--c-text); }
-```
+Folder color rule belongs to REF-0007 (monochrome colors). Folders inherit
+default text color until then.
 
 ## 4. Scope & Impact
 
-- **Komponen terdampak:** `graps/public/app.js` — `buildTreeData()`, `renderNode()`, `onNodeClick()`, `onNodeDblClick()`, `onNodeKey()`. `graps/public/app.css` — add folder color rule.
-- **Blast Radius:** Medium. Tree rendering is completely restructured. Click contract changes (folders added). No backend/scanner changes — graph data stays the same, only frontend interpretation changes.
-- **Impact on FEAT-0012:** Module overview tabs still work — modules are still in the tree as intermediate nodes. Clicking a module node still calls `openTab(node.id, 'module', node.label, ...)`.
-- **Impact on FEAT-0008/0009:** Tree structure now matches the plan's folder/module/file/function hierarchy.
+- **Komponen terdampak:** `graps/public/app.js` — `buildTreeData()` (rewritten), `renderNode()` (icon map + guard), `onNodeClick()` (folder early-return). No CSS changes (deferred to REF-0007).
+- **Blast Radius:** Medium. Tree rendering restructured. Click contract adds `folder` type (toggleExpand only). No backend/scanner/API changes — graph data unchanged.
+- **Impact on FEAT-0012 (module overview tabs):** Module nodes removed from tree → module-overview tabs become **unreachable from the tree UI**. `renderModule()` code preserved for re-wiring later (e.g., search/command palette). Known consequence of Option B, user-approved.
+- **Impact on FEAT-0008/0009:** Tree structure now matches issue.md's desired folder/file/function hierarchy.
 
 ## 5. Lifecycle Stage Tracking
 
-Compact — belum ada stage yang dimulai (27 tahap, lihat 03 §3.1).
-Akan di-expand ke Expanded Form begitu `status` naik ke `in-progress`.
+Expanded from compact form after implementation (2026-07-16).
+
+| Stage | Status | Evidence |
+|---|---|---|
+| 1–8 (Discovery→Planning) | Done | This entity file + issue.md violation #3 |
+| 9 (Design) | Done | Option B chosen, user-approved |
+| 10–11 (Self/AI Review) | Done | Root cause traced via graph.json probe; deviation reported to user |
+| 12 (Implementation) | Done | `buildTreeData()` rewrite, `renderNode()` icon guard, `onNodeClick()` folder branch — `graps/public/app.js` |
+| 13 (Testing) | Done | `node --check` syntax pass; browser smoke test: folder expand, file→source tab, functions render, 0 console errors |
+| 14 (Security Review) | Done | Frontend-only, no new data exposure, no input handling changes |
+| 15 (Performance) | Done | `find()` per folder is O(n); ceiling ~1000 files (graps has 137). Upgrade path: `Map` for children lookup |
+| 16 (Negative Scenario) | Done | Empty-path guard (`if (!f.path) continue`); empty tree handled by existing `renderTree()` empty state |
+| 17 (Compatibility) | Done | Vanilla JS, no new deps, works on mobile (no new touch targets below 44px) |
+| 18–27 (Formal Review→Archive) | Pending | Awaiting user code review + User Testing Result |
 
 ## 6. Mandatory Review Section
 
 ### Potential Bugs
-- Folder dedup: two files in the same folder (`graps/ai/cache.py` + `graps/ai/provider.py`) must share the same `graps/ai/` folder node. The trie approach handles this via `cur.children.find()`.
-- Module dedup: a module with multiple files (e.g., `graps.ai` package with `__init__.py` + `cache.py`) must have all files under one module node. Handled via `modByFile` lookup and module node dedup by `mod.id`.
-- Orphan files: files without a `module_id` (non-Python, `__init__.py` in namespace dirs) go directly under their folder. Handled by the `if (mod)` else branch.
-- Empty folders: if a folder has no files, it won't appear in the tree. This is correct — we build from files, not from directory listing.
+- Folder dedup: two files in the same folder (`graps/ai/cache.py` + `graps/ai/provider.py`) share the same `ai/` folder node. Trie approach handles via `cur.children.find()`. ✓ verified in browser.
+- Empty folders: folders only appear if they contain files (built from files, not directory listing). Correct — no empty folders shown.
+- Empty path guard: files with missing/empty `path` skipped via `if (!f.path) continue`. ✓
+- `onNodeDblClick` for folders: falls through harmlessly (no branch matches `folder`). Single-click already toggled. No double-toggle bug. ✓
 
 ### Known Risks
-- Performance: `find()` on children array for each file is O(n) per folder. For large repos (1000+ files), this could be slow. Ceiling: ~1000 files. Upgrade path: use `Map` for children lookup if perf becomes an issue.
-- Module label: `mod.name || mod.id` — modules currently have `id` (dotted) but may not have `name`. Label will show dotted ID. This matches current behavior.
+- **FEAT-0012 module tabs unreachable from tree** (Option B consequence). Mitigation: `renderModule()` code preserved; re-wire via search/command palette later if needed.
+- Performance: `find()` on children array per file is O(n) per folder. Ceiling: ~1000 files. Upgrade path: `Map` for children lookup. Current: 137 files, no perf issue.
+- Folder label: uses path segment directly (e.g., `ai`), not dotted module name. Matches issue.md desired tree.
 
 ### Edge Cases
-- Root-level files (no folder): `graps/cli.py` → `segs = ['graps', 'cli.py']` → folder `graps/` → file `cli.py`. Works correctly.
-- Deeply nested: `graps/scanner/ast_parser.py` → folders `graps/` → `scanner/` → file `ast_parser.py`. Works correctly.
-- File with no module (e.g., `index.html`): goes directly under its folder. Works correctly.
-- Module spanning multiple folders: module `graps.ai` has files in `graps/ai/` — all under same folder. Module node created once, files appended. Works correctly.
+- Root-level files (no folder): `HANDOFF.md` → `segs = ['HANDOFF.md']` → no folder loop → file at root. ✓ verified in browser.
+- Deeply nested: `graps/scanner/ast_parser.py` → folders `graps/` → `scanner/` → file. ✓
+- Non-Python files (`README.md`, `.yml`): appear as files under their folder, no module wrapper. ✓ verified (`.github/`, `HANDOFF.md` at root).
 
 ### Failure Cases
-- If `f.path` is missing or empty → `segs` will be `['']` → `fileName` empty. File won't render correctly. Guard: skip files with empty path.
-- If `graph.nodes.files` is empty → tree is empty. Already handled by `renderTree()` empty state.
+- If `f.path` missing → skipped by guard. ✓
+- If `graph.nodes.files` empty → tree empty. Handled by `renderTree()` empty state. ✓
 
 ### Negative Test Cases
-- Verify tree shows folder hierarchy: `graps/` → `ai/` → `(module) graps.ai` → `provider.py` → `chat`
-- Verify module node is clickable → opens module overview tab
-- Verify folder node is clickable → expands/collapses, no tab opened
-- Verify file node is clickable → opens source tab + expands to show functions
-- Verify function node is clickable → opens flow tab
-- Verify folders sort alphabetically
-- Verify modules sort after folders, before files
-- Verify files without modules appear directly under their folder
+- ✓ Tree shows folder hierarchy: `graps/` → `ai/` → files (verified in browser, expanded `graps/` shows `ai/`, `public/`, `scanner/`, `server/` + `__init__.py`, `cli.py`, `storage.py`)
+- ✓ Folder click → expands/collapses, no tab opened
+- ✓ File click → opens source tab + expands to show functions (verified: `cli.py` → source tab, `_is_excluded_file` + 5 more functions visible)
+- ✓ Folders sort before files, alphabetical within group
+- ✓ No console errors after folder expand + file click
 
 ### Regression Risk
-- Medium. Tree rendering is the core UX of the dir-panel. Any bug in `buildTreeData()` makes the entire tree unusable. However, the change is isolated to frontend — no backend/scanner/API changes. Existing Python tests are unaffected.
-- Click contract for module/file/function nodes is unchanged — only `folder` type is added.
+- Low–Medium. Tree rendering is core dir-panel UX. Change isolated to frontend — no backend/scanner/API changes. Python tests unaffected.
+- Click contract for file/function nodes unchanged — only `folder` type added.
+- FEAT-0012 module-overview tabs: regression — unreachable from tree (known, Option B). Code preserved.
 
 ### Rollback Plan
-- Revert the commit. The old `buildTreeData()` is preserved in git history. No data migration needed — graph data structure is unchanged.
+- `git revert <commit>`. Old `buildTreeData()` preserved in history. No data migration — graph data structure unchanged.
 
 ### Validation Checklist
-- [ ] `buildTreeData()` rewritten to build folder/module/file/function trie from file paths
-- [ ] `makeFileNode()` helper extracted
-- [ ] `renderNode()` icon map includes `folder` type
-- [ ] `onNodeClick()` handles `folder` type (toggleExpand only, no tab)
-- [ ] `onNodeDblClick()` handles `folder` type (toggleExpand only, no tab)
-- [ ] `onNodeKey()` handles `folder` type (ArrowLeft/Right)
-- [ ] CSS rule for folder type added
-- [ ] Tree renders with folder hierarchy for graps repo
-- [ ] Module nodes appear as intermediate level
-- [ ] Files without modules appear directly under folder
-- [ ] No console errors on tree render
+- [x] `buildTreeData()` rewritten to build folder/file/function trie from file paths
+- [x] `makeFileNode()` helper preserved (`mkFile` inline)
+- [x] `renderNode()` icon map includes `folder` type (null = no icon, chevron only)
+- [x] `onNodeClick()` handles `folder` type (toggleExpand only, no tab)
+- [x] `onNodeKey()` handles `folder` type (ArrowLeft/Right via toggleExpand, Enter via onNodeClick) — unchanged, works
+- [ ] CSS rule for folder type — **deferred to REF-0007**
+- [x] Tree renders with folder hierarchy for graps repo
+- [x] ~~Module nodes appear as intermediate level~~ — N/A (Option B: no module nodes)
+- [x] Files without modules appear directly under folder (all files, since no module layer)
+- [x] No console errors on tree render
 
 ### Review Checklist
-- [ ] Self Review
-- [ ] AI Review
-- [ ] Code Review
-- [ ] Security Review
-- [ ] Performance Review
-- [ ] Compatibility Review
+- [x] Self Review
+- [x] AI Review
+- [ ] Code Review — awaiting user
+- [x] Security Review — frontend-only, no new data exposure
+- [x] Performance Review — O(n) find, ceiling 1000 files, current 137
+- [x] Compatibility Review — vanilla JS, mobile-safe, no new deps
 
 ### Acceptance Checklist
-- [ ] Tree shows `graps/` → `ai/` → `(module) graps.ai` → `provider.py` → `chat`
-- [ ] Folder expand/collapse works
-- [ ] Module click opens module tab
-- [ ] File click opens source tab + expands
-- [ ] Function click opens flow tab
-- [ ] Folders/files/modules sort correctly
+- [x] Tree shows `graps/` → `ai/` → `provider.py` → `chat` (folder→file→function, no module layer)
+- [x] Folder expand/collapse works
+- [ ] ~~Module click opens module tab~~ — N/A (Option B: no module nodes in tree)
+- [x] File click opens source tab + expands
+- [x] Function click opens flow tab (200ms preview delay, FEAT-0013 — contract unchanged)
+- [x] Folders/files sort correctly (folders first, then files, alphabetical)
 
 ### User Testing Result
--
+- Pending user review (browser smoke test passed on agent side: 0 JS errors, tree structure matches issue.md).
 
 ### Post Implementation Review
--
+- Implementation completed 2026-07-16. Option B chosen after discovering scanner makes 1 module per file (deviation from plan's assumption of package-grouped modules). Fix is 3 targeted edits to `app.js`: `buildTreeData()` rewrite, `renderNode()` icon guard, `onNodeClick()` folder branch. No new files, no new deps, no CSS changes (deferred to REF-0007). Browser smoke test confirmed folder hierarchy renders, file click opens source tab + functions, 0 console errors.
 
 ### Lessons Learned
--
+- **Probe real data before trusting plan assumptions.** REF-0006's proposed fix was written assuming package-grouped modules. Probing `.graps/graph.json` revealed 1-module-per-file, which would have made the literal fix worse than the bug. Always probe scanner output shape before writing tree/grouping logic.
+- **Plan deviations must be reported, not silently worked around.** issue.md Note explicitly required this; the deviation (scanner data model vs plan assumption) was a real plan-vs-source mismatch requiring user decision.
 
 ### Future Improvement
 - Use `Map` for children lookup in `buildTreeData()` if perf becomes an issue with large repos (>1000 files).
 - Add folder collapse-all/expand-all keyboard shortcut.
-- Show module metadata (dependency count, confidence) as tooltip on module node.
+- Re-wire module-overview tabs (FEAT-0012) via search or command palette so they're reachable without module tree nodes.
+- Show module metadata (dependency count, confidence) as tooltip on file nodes if needed.
