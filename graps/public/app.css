@@ -64,6 +64,7 @@ body {
 
 /* --- Top bar (REF-0008) — split icons on right --------------------------- */
 .top-bar {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: flex-end;

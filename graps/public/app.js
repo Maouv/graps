@@ -552,6 +552,12 @@ async function init() {
   send.addEventListener('click', submit);
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
 
+  // mobile: start with panels closed — drawers, not columns (REF-0008)
+  if (isMobile()) {
+    togglePanel('dir');
+    togglePanel('ai');
+  }
+
   // responsive: re-check on resize
   window.addEventListener('resize', () => {
     if (!isMobile()) { applyWidth('dir'); applyWidth('ai'); hideBackdrop(); }
