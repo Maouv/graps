@@ -1,7 +1,7 @@
 ```
 
 +----------------------+--------------------------------------+----------------------------+
-|        kosongin      |          kosongin dulu               |                            |
+|  make it empty first  |          make it empty first         |                            |
 |                      |                                      | (-split-kiri) (split kanan)|
 +----------------------+--------------------------------------+----------------------------+
 |    explorer          |                 untuk nmbh tab->  +  |         Ai                 |
@@ -26,9 +26,9 @@
 ```
 
 
-       tolong nama2 panel ini jangan di ubab, apapaun alasan nya. dan yang ada tulisan kosong beneran di kosongin
+       Please don't change the names of these panels, whatever the reason. And leave the blank fields blank.
 
-detail2 panel
+### detail2 panel
 
 ### dir-papnel
 (project) E-Commerce
@@ -70,29 +70,19 @@ detail2 panel
 │
 └── (folder) ai
 
-### behavior dir panel
-user bisa mengklik semua hal yang ada di sini behavior nya
-1.jika user klik folder akan expand dan buka file module yang ada di dalam nya tapi ga buka tab di workspace, berlaku untuk semua folder
-2.jika user klik file, function yang ada di dalam nya akan terexpand dan akan membuka tab source code file tersebut di workspace
-3. jika user klik module function yang di dalam nya akan ter expand dan membuka tab untuk module nya di workspace
-4. jika user klik flow, di workspace akan buka tab baru dan memunculkan flow nya. 
+### 'dir' panel behavior Users can interact with the items displayed here; the behaviors are as follows: 1. Clicking a folder expands it to reveal the module files inside without opening a tab in the workspace; this applies to all folders. 2. Clicking a file expands it to show its internal functions and opens a source code tab for that file in the workspace. 3. Clicking a module expands it to show its internal functions and opens a tab for that module in the workspace. 4. Clicking a flow opens a new tab in the workspace and displays the flow.
 
-### behavior workspace
-detail yang ada di workspace
-workspace sama seperti ide lain bisa tambah tab 1 tab 1 file/flow
-workspace memunculkan source code dan flow
-
+### Workspace behavior Details regarding the workspace: Like other IDEs, the workspace supports multiple tabs, with each tab representing a single file or flow. The workspace displays source code and flows.
 
 ### workspace
 
 flow definition
-"Menjelaskan node yang sedang dipilih secara visual."
-contoh:
+"Visually describes the currently selected node."
 ```
-di panel kiri user klil
+in dir panel when user klik
 ƒ login()
 
-di workspace muncul tab
+while summon on workspace
 +--------------------------------------------------+
 
                 login()
@@ -150,35 +140,22 @@ Files
 
 ```
 
-untuk source code sama kaya ide pada umumnya memunculkan isi file
-
+ource code the same as the idea in general to display the contents of the file, like other IDE (integrated development evironment)
 
 ### ai-panel
-untuk saat ini tambahin input bar aja
+t stay as it is now
 
 ### Design
-itu adalah website versi dekstop, dan untuk mobile dan table tolong di samakan
-warna primary nya #181818(background, workspace), teks/storke/garis/border #E4E4E4, #1F1F1F (dir-panel, ai panel), warna box/input bar #404040
+This is the desktop version of the website, and for mobile and tablet, please match the primary color #181818 (background, workspace), text/stroke/line/border #E4E4E4, #1F1F1F (dir-panel, ai panel), color
 
-input bar/box/bar/search pake
+input bar/box/bar/search use
 xs  sm  md  lg   xl    pill     full
 4px 6px 8px 12px 16px  9999px    9999px
 
 border 1px
 
 ### Icon split
-icon split di sini berfungsi sebagai open panel (dir panel dan ai panel)
-terdapat 2 icon yang saya berikan, pembeda nya hanya select dan uselect. 
-behaviornya 
-jika user klik (select) pake icon
-split-horizontal-right-select.svg
-jika user tidak select (unselect maka pake icon
-split-horizontal-right-unselect.svg
+The "split" icon here functions as a panel toggle (for the directory panel and AI panel). I have provided two icons; the difference lies in their "selected" and "unselected" states. The behavior is as follows: If the user selects the icon, `split-horizontal-right-select.svg` is used. If the user deselects it, `split-horizontal-right-unselect.svg` is used. The workflow is: clicking switches it to the "selected" state, and clicking again switches it to the "unselected" state. By the way, the icons I provided are specifically for the AI ​​panel (on the right); for the directory panel (on the left), those same two icons need to be flipped via code, and they must remain separate. Please refer to the layout.
 
-flownya jika user penct -> berubah ke selelct jika user pencet lagi berubah ke -> unselect
-
-btw icon yang aku kasih cuma untuk ai-panel yaitu kanan, untuk kiri dir-panel 2 icon tadi harus di flip menggunakan code dan mereka harus bepisah. liat layout
-
-icon ada di
 ~/graps/graps/public/icon
 
