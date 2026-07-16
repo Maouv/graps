@@ -22,3 +22,23 @@
 - **Affected:** `graps/server/app.py` — `/api/source` endpoint, `build_ai_context`
 - **Fix:** Also check `_is_credential_file(target.name)` after `.resolve()`. 2-line change.
 - **Status:** Open — pending fix.
+
+## BUG-0003: `$$` undefined in app.js — init() crash, panel toggles/resizers broken
+
+- **Reported:** 2026-07-16
+- **Severity:** High — all panel interactions broken on both desktop and mobile
+- **Root cause:** `$$` helper used at app.js lines 537, 541 but never defined. Only `$` defined at line 38. `init()` throws `ReferenceError: $$ is not defined` → panel close, split toggle, resizer, AI input handlers never attached.
+- **Plan contract:** `experimental-graps.md` — panel-header with split toggle controls. `issue.md` bug #2 — panels not responsive/resizable.
+- **Affected:** `graps/public/app.js`, `graps/public/index.html`
+- **Fix:** Add `const $$ = (s) => document.querySelectorAll(s);` after line 38. Also remove X close buttons from dir-panel + ai-panel headers (replaced by panel-header split toggles). Also remove `ai-status-text` + `ai-status-dot` (enrich UI deletion per issue.md).
+- **Status:** Open — entity created in `07-bugs-and-fixes/bug-0003-init-crash-undefined-helper.md`.
+
+## BUG-0004: `crypto.randomUUID()` fails in non-secure context — click file/function opens no tab
+
+- **Reported:** 2026-07-16
+- **Severity:** High — clicking file/function in tree does nothing on mobile (HTTP + LAN IP)
+- **Root cause:** `openTab()` at app.js line 175 uses `crypto.randomUUID()` which requires secure context (HTTPS or localhost). User accesses from Android over LAN (HTTP + non-localhost) → `TypeError: crypto.randomUUID is not a function` → `openTab()` throws inside `onNodeClick`'s setTimeout → no tab created, no content rendered.
+- **Plan contract:** `experimental-graps.md` — "Clicking a file expands it to show its internal functions and opens a source code tab." `issue.md` bug #1 — click file/function doesn't summon tabs.
+- **Affected:** `graps/public/app.js`
+- **Fix:** Replace `crypto.randomUUID()` with fallback: `crypto.randomUUID?.() ?? (Date.now().toString(36) + Math.random().toString(36).slice(2))`.
+- **Status:** Open — entity created in `07-bugs-and-fixes/bug-0004-crypto-randomuuid-insecure-context.md`.
