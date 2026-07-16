@@ -67,3 +67,22 @@
   - **B:** Add explicit "close all tabs" action (button or /scan command) — keeps persistence, gives user control.
   - **C:** Verify closeTab works correctly first — if persistence is the only issue, the fix may just be clearing settings on startup.
 - **Status:** Open — pending investigation + user decision on expected persistence scope.
+
+## BUG-0007: Port not released after Ctrl+C — pre-flight check fails on TIME_WAIT
+
+- **Reported:** 2026-07-16
+- **Severity:** Medium — user must wait ~60s or change port between runs; `ss -tlnp` shows nothing (port is in TIME_WAIT, not LISTEN)
+- **Root cause:** `_port_free()` in `cli.py` (line 132–141) binds a socket to check port availability but does NOT set `SO_REUSEADDR`. After `server.run()` stops (Ctrl+C), the port enters `TIME_WAIT` (typically 60s). Next run's `_port_free()` tries `bind()` → fails with `EADDRINUSE` on TIME_WAIT socket → reports "Port already in use" even though no process is listening. `ss -tlnp` only shows LISTEN sockets, so it appears empty.
+- **Affected:** `graps/cli.py` — `_port_free()` function
+- **Fix:** Add `s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)` before `s.bind()`. One-line fix. Uvicorn already sets `SO_REUSEADDR` on its server socket, so only the pre-flight check is broken.
+- **Status:** Open — pending fix.
+
+## BUG-0008: Mobile panels cover workspace — should be 3-column (dir|workspace|ai) on all devices
+
+- **Reported:** 2026-07-16
+- **Severity:** High — workspace unusable on mobile when both panels open; panels overlap each other and cover workspace
+- **Root cause:** Mobile CSS (≤1024px media query) sets panels to `position: fixed` drawers (`width: 80vw`, slide over workspace). When both panels `data-open="true"`, they overlap each other and cover the workspace entirely. User wants: `dir-panel | workspace | ai-panel` (3-column flex layout) on ALL devices, same as desktop. Additionally: (1) `applyWidth()` returns early on mobile (`if (isMobile()) return;`), so panel widths aren't applied; (2) resizers hidden on mobile (`display: none`), so panels can't be resized via touch.
+- **Plan contract:** `experimental-graps.md` layout shows 3-column `dir-panel | workspace | ai-panel`. `issue.md` layout section shows the same 3-column structure. No drawer/backdrop pattern specified. Current drawer behavior was added during FEAT-0007 and deviates from the plan.
+- **Affected:** `graps/public/app.css` (mobile media query), `graps/public/app.js` (`applyWidth()`, `initResizers()`, mobile init in `init()`)
+- **Fix:** Replace mobile drawer CSS with 3-column layout (remove `position: fixed`, `transform`, `backdrop`; keep panels in flex flow with narrower default widths). Show resizers on mobile. Remove `isMobile()` guard from `applyWidth()`. Lower minimum panel width for mobile (200px → ~80px). Also revert the JS mobile init (`if (isMobile()) { togglePanel('dir'); togglePanel('ai'); }`) since it violates CSS-first principle (FEAT-0007) and is no longer needed with 3-column layout.
+- **Status:** Open — pending fix.
