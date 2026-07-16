@@ -78,8 +78,8 @@ current
 earlyer plan says the layoyt like this
 ```
 +----------------------+--------------------------------------+----------------------------+
-|  make it empty first |          make it empty first         |                            | <- we miss this parts panel header
-|                      |                                      | (-split-kiri) (split kanan)|  
+|  make it empty first            make it empty first                                      | <- we miss this parts panel header
+|                                                               (-split-kiri) (split kanan)|  
 +----------------------+--------------------------------------+----------------------------+
 |    explorer          |                 untuk nmbh tab->  +  |         Ai                 |
 |----------------------|--------------------------------------|----------------------------|
