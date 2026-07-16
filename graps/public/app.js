@@ -38,6 +38,8 @@ async function api(path, opts = {}) {
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 const iconSvg = (id) => `<svg class="icon"><use href="#${id}"/></svg>`;
+// ponytail: crypto.randomUUID needs secure context (HTTPS/localhost). Fallback for LAN HTTP.
+const uid = () => crypto.randomUUID?.() ?? (Date.now().toString(36) + Math.random().toString(36).slice(2));
 
 /* --- Tree (FEAT-0008/0009) ----------------------------------------------- */
 function buildTreeData(graph) {
@@ -173,7 +175,7 @@ function openTab(entityId, type, title, preview = true) {
   if (tab) {
     if (!preview) tab.preview = false;  // pin if double-click
   } else {
-    tab = { id: crypto.randomUUID(), entityId, type, title, preview };
+    tab = { id: uid(), entityId, type, title, preview };
     state.tabs.push(tab);
   }
   state.activeTabId = tab.id;
