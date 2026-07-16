@@ -36,6 +36,7 @@ async function api(path, opts = {}) {
 
 /* --- DOM helpers --------------------------------------------------------- */
 const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
 const iconSvg = (id) => `<svg class="icon"><use href="#${id}"/></svg>`;
 
 /* --- Tree (FEAT-0008/0009) ----------------------------------------------- */
@@ -386,20 +387,8 @@ function applyWidth(name) {
 }
 
 /* --- AI panel (FEAT-0004/0014/0015) -------------------------------------- */
-async function checkAIStatus() {
-  const dot = $('#ai-status-dot');
-  const txt = $('#ai-status-text');
-  try {
-    const s = await api('/api/settings');
-    state.aiAvailable = s.ai_enrichment !== false;
-    dot.className = 'ai-status-dot' + (state.aiAvailable ? ' ok' : '');
-    txt.textContent = state.aiAvailable ? 'AI enrichment: ON' : 'AI enrichment: OFF';
-  } catch {
-    state.aiAvailable = false;
-    dot.className = 'ai-status-dot err';
-    txt.textContent = 'AI status unavailable';
-  }
-}
+// ponytail: checkAIStatus removed — enrich UI (status dot/text) deleted in BUG-0003.
+// aiAvailable now set from loadSettings() to avoid duplicate /api/settings fetch.
 
 async function sendAI(msg) {
   const msgs = $('#ai-messages');
@@ -445,6 +434,7 @@ async function loadSettings() {
   try {
     const s = await api('/api/settings');
     state.settings = s;
+    state.aiAvailable = s.ai_enrichment !== false;
     if (s.panel_widths) {
       state.widths.dir = clampW(s.panel_widths.dir) || 280;
       state.widths.ai = clampW(s.panel_widths.ai) || 320;
@@ -530,14 +520,9 @@ async function init() {
     $('#tree').innerHTML = `<p class="empty-state">Failed to load: ${esc(err.message)}</p>`;
   }
 
-  // AI status
-  checkAIStatus();
+  // AI status — set from loadSettings() (enrich UI removed in BUG-0003)
 
-  // panel close buttons
-  $$('.panel-close').forEach(btn => {
-    btn.addEventListener('click', () => togglePanel(btn.dataset.panel));
-  });
-  // split toggle buttons
+  // split toggle buttons (sole panel toggle mechanism post-BUG-0003)
   $$('.split-btn').forEach(btn => {
     btn.addEventListener('click', () => togglePanel(btn.dataset.panel));
   });

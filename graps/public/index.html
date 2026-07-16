@@ -27,9 +27,6 @@
   <aside id="dir-panel" class="panel dir-panel" data-open="true">
     <header class="panel-header">
       <h2 class="panel-title">Explorer</h2>
-      <button class="icon-btn panel-close" data-panel="dir" aria-label="Close explorer panel">
-        <svg class="icon"><use href="#i-close"/></svg>
-      </button>
     </header>
     <div class="panel-body tree" id="tree" role="tree" aria-label="Project structure">
       <p class="empty-state">Loading…</p>
@@ -77,13 +74,8 @@
   <aside id="ai-panel" class="panel ai-panel" data-open="true">
     <header class="panel-header">
       <h2 class="panel-title">AI</h2>
-      <span class="ai-status-dot" id="ai-status-dot" title="AI status"></span>
-      <button class="icon-btn panel-close" data-panel="ai" aria-label="Close AI panel">
-        <svg class="icon"><use href="#i-close"/></svg>
-      </button>
     </header>
     <div class="ai-body">
-      <div class="ai-status-text" id="ai-status-text" aria-live="polite">Checking…</div>
       <div class="ai-messages" id="ai-messages" aria-live="polite" aria-atomic="false"></div>
       <div class="ai-input-bar">
         <input type="text" id="ai-input" placeholder="Ask or /scan…"
