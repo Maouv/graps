@@ -439,9 +439,11 @@ body {
 /* --- Responsive (FEAT-0007) ---------------------------------------------- */
 /* Tablet: ≤1024px — drawers, not 3 columns */
 @media (max-width: 1024px) {
+  /* top bar always visible above panels + backdrop (REF-0008 mobile fix) */
+  .top-bar { z-index: 110; }
   .dir-panel, .ai-panel {
     position: fixed;
-    top: 0;
+    top: var(--header-h);
     bottom: 0;
     z-index: 100;
     width: 80vw !important;
@@ -458,7 +460,10 @@ body {
   }
   .backdrop {
     position: fixed;
-    inset: 0;
+    top: var(--header-h);
+    left: 0;
+    right: 0;
+    bottom: 0;
     background: rgba(0,0,0,.5);
     z-index: 90;
     cursor: pointer;
