@@ -42,3 +42,28 @@
 - **Affected:** `graps/public/app.js`
 - **Fix:** Replace `crypto.randomUUID()` with fallback: `crypto.randomUUID?.() ?? (Date.now().toString(36) + Math.random().toString(36).slice(2))`.
 - **Status:** Fixed (commit `2af41a8`) — entity in `07-bugs-and-fixes/bug-0004-crypto-randomuuid-insecure-context.md`.
+
+## BUG-0005: Flow tab 404 — renderFlow builds wrong flow ID
+
+- **Reported:** 2026-07-16 (found during REF-0006 manual testing)
+- **Severity:** Medium — function click opens flow tab but content shows 404; flow view unusable
+- **Root cause:** `renderFlow()` (app.js line 282) computes `flowId = \`${fileFn[0]}#call_sequence\`` where `fileFn = tab.entityId.split('::')`. This uses only the FILE part of the function ID, dropping the `::function.name` qualifier. Actual flow IDs in graph are keyed by the FULL function id: `graps/ai/cache.py::cache.read_cache#call_sequence`. Computed flow ID `graps/ai/cache.py#call_sequence` → no match → API `/api/flows/{flow_id}` returns 404.
+- **Evidence:** `.graps/graph.json` has 515 flows, all keyed `<full_fn_id>#call_sequence`. `renderFlow` drops the function qualifier.
+- **Plan contract:** `experimental-graps.md` FEAT-0011 — "Clicking a function opens a flow tab showing call_sequence steps."
+- **Affected:** `graps/public/app.js` — `renderFlow()` line 278–303
+- **Pre-existing:** NOT caused by REF-0006. REF-0006 only changed tree structure (folder trie); function node `id` passed to `openTab` is unchanged (`fn.id`, full function id). Bug exists since flow tab was written.
+- **Fix:** Line 282 — use full `tab.entityId` instead of `fileFn[0]`: `const flowId = \`${tab.entityId}#call_sequence\`;` (drop the `split('::')` + `[0]` indirection entirely).
+- **Status:** Open — pending fix.
+
+## BUG-0006: Tabs persist across server restarts — no way to clear stale tabs
+
+- **Reported:** 2026-07-16 (found during REF-0006 manual testing)
+- **Severity:** Low–Medium — stale tabs from previous session reappear after server restart; user expects clean slate on restart
+- **Root cause:** `loadSettings()` (app.js line 443) restores `state.tabs` from `/api/settings` (`.graps/settings.json`) on page load. `persistTabs()` saves tabs on every open/close. On server restart, page reload fetches settings.json which still has the old tabs → tabs reappear. This is FEAT-0013 tab-persistence working as designed, but the persistence scope (survive restart) may not match user expectation (persist within session only).
+- **Secondary possibility:** close button itself may not be removing tabs (if `persistTabs()` fails silently, settings.json keeps stale list). Needs verification — check whether closeTab actually removes + persists.
+- **Affected:** `graps/public/app.js` — `loadSettings()`, `persistTabs()`, `closeTab()`
+- **Fix options:**
+  - **A:** Clear tabs on server restart — don't restore tabs from settings on `loadSettings()` (remove the tab-restore block, lines 453–462). Loses session-restore across browser refresh.
+  - **B:** Add explicit "close all tabs" action (button or /scan command) — keeps persistence, gives user control.
+  - **C:** Verify closeTab works correctly first — if persistence is the only issue, the fix may just be clearing settings on startup.
+- **Status:** Open — pending investigation + user decision on expected persistence scope.
