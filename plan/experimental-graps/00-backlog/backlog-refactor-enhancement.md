@@ -60,7 +60,7 @@
 - **Severity:** High — split buttons in wrong location, panel-header missing
 - **Gap:** Split buttons currently in workspace toolbar. Plan wants single panel-header row at top, both split icons on right side. User wants to update layout after this.
 - **Affected:** `graps/public/index.html`, `graps/public/app.js`, `graps/public/app.css`
-- **Status:** Open — entity created in `08-refactor-and-enhancement/ref-0008-layout-panel-header.md`.
+- **Status:** Done — entity in `08-refactor-and-enhancement/ref-0008-layout-panel-header.md`, status: done.
 
 ## REF-0009: Icon refactor — folder.svg, file.svg from codicons, ƒ for functions
 

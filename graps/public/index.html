@@ -23,72 +23,78 @@
 
 <div id="app" class="app">
 
-  <!-- LEFT: dir-panel — explorer tree (FEAT-0002/0008/0009) -->
-  <aside id="dir-panel" class="panel dir-panel" data-open="true">
-    <header class="panel-header">
-      <h2 class="panel-title">Explorer</h2>
-    </header>
-    <div class="panel-body tree" id="tree" role="tree" aria-label="Project structure">
-      <p class="empty-state">Loading…</p>
-    </div>
-  </aside>
+  <!-- Top bar: panel-header, split icons on right (REF-0008) -->
+  <div class="top-bar">
+    <button class="icon-btn split-btn" data-panel="dir" aria-pressed="true"
+            aria-label="Toggle explorer panel">
+      <img src="/icon/split-horizontal-right-select.svg" alt=""
+           class="split-img split-mirror" data-state="select">
+    </button>
+    <button class="icon-btn split-btn" data-panel="ai" aria-pressed="true"
+            aria-label="Toggle AI panel">
+      <img src="/icon/split-horizontal-right-select.svg" alt=""
+           class="split-img" data-state="select">
+    </button>
+  </div>
 
-  <!-- Left resizer (FEAT-0006) -->
-  <div class="resizer" id="resizer-left" role="separator"
-       aria-orientation="vertical" aria-label="Resize explorer panel" tabindex="0"></div>
+  <!-- Panels row (REF-0008) -->
+  <div class="panels-row">
 
-  <!-- CENTER: workspace — source/flow/module tabs (FEAT-0003/0010/0011/0012/0013) -->
-  <main id="workspace" class="workspace">
-    <div class="workspace-toolbar">
-      <div class="tab-bar" id="tab-bar" role="tablist" aria-label="Open tabs">
-        <span class="tab-empty">No tabs open</span>
+    <!-- LEFT: dir-panel — explorer tree (FEAT-0002/0008/0009) -->
+    <aside id="dir-panel" class="panel dir-panel" data-open="true">
+      <header class="panel-header">
+        <h2 class="panel-title">Explorer</h2>
+      </header>
+      <div class="panel-body tree" id="tree" role="tree" aria-label="Project structure">
+        <p class="empty-state">Loading…</p>
       </div>
-      <div class="split-actions">
-        <!-- Left split: mirror of right custom SVG via CSS (FEAT-0005) -->
-        <button class="icon-btn split-btn" data-panel="dir" aria-pressed="true"
-                aria-label="Toggle explorer panel">
-          <img src="/icon/split-horizontal-right-select.svg" alt=""
-               class="split-img split-mirror" data-state="select">
-        </button>
-        <!-- Right split: custom SVG source asset (FEAT-0005) -->
-        <button class="icon-btn split-btn" data-panel="ai" aria-pressed="true"
-                aria-label="Toggle AI panel">
-          <img src="/icon/split-horizontal-right-select.svg" alt=""
-               class="split-img" data-state="select">
-        </button>
-      </div>
-    </div>
-    <div class="tab-content" id="tab-content">
-      <div class="workspace-empty" id="workspace-empty">
-        <svg class="empty-icon"><use href="#i-module"/></svg>
-        <p>Select a file, function, or module from the explorer.</p>
-      </div>
-    </div>
-  </main>
+    </aside>
 
-  <!-- Right resizer (FEAT-0006) -->
-  <div class="resizer" id="resizer-right" role="separator"
-       aria-orientation="vertical" aria-label="Resize AI panel" tabindex="0"></div>
+    <!-- Left resizer (FEAT-0006) -->
+    <div class="resizer" id="resizer-left" role="separator"
+         aria-orientation="vertical" aria-label="Resize explorer panel" tabindex="0"></div>
 
-  <!-- RIGHT: ai-panel — status + input (FEAT-0004/0014/0015) -->
-  <aside id="ai-panel" class="panel ai-panel" data-open="true">
-    <header class="panel-header">
-      <h2 class="panel-title">AI</h2>
-    </header>
-    <div class="ai-body">
-      <div class="ai-messages" id="ai-messages" aria-live="polite" aria-atomic="false"></div>
-      <div class="ai-input-bar">
-        <input type="text" id="ai-input" placeholder="Ask or /scan…"
-               aria-label="AI input" autocomplete="off" spellcheck="false">
-        <button id="ai-send" class="icon-btn" aria-label="Send">
-          <svg class="icon"><use href="#i-sync"/></svg>
-        </button>
+    <!-- CENTER: workspace — source/flow/module tabs (FEAT-0003/0010/0011/0012/0013) -->
+    <main id="workspace" class="workspace">
+      <div class="workspace-toolbar">
+        <div class="tab-bar" id="tab-bar" role="tablist" aria-label="Open tabs">
+          <span class="tab-empty">No tabs open</span>
+        </div>
+        <!-- .split-actions removed — buttons moved to .top-bar (REF-0008) -->
       </div>
-    </div>
-  </aside>
+      <div class="tab-content" id="tab-content">
+        <div class="workspace-empty" id="workspace-empty">
+          <svg class="empty-icon"><use href="#i-module"/></svg>
+          <p>Select a file, function, or module from the explorer.</p>
+        </div>
+      </div>
+    </main>
 
-  <!-- Mobile overlay backdrop -->
-  <div class="backdrop" id="backdrop" hidden></div>
+    <!-- Right resizer (FEAT-0006) -->
+    <div class="resizer" id="resizer-right" role="separator"
+         aria-orientation="vertical" aria-label="Resize AI panel" tabindex="0"></div>
+
+    <!-- RIGHT: ai-panel — status + input (FEAT-0004/0014/0015) -->
+    <aside id="ai-panel" class="panel ai-panel" data-open="true">
+      <header class="panel-header">
+        <h2 class="panel-title">AI</h2>
+      </header>
+      <div class="ai-body">
+        <div class="ai-messages" id="ai-messages" aria-live="polite" aria-atomic="false"></div>
+        <div class="ai-input-bar">
+          <input type="text" id="ai-input" placeholder="Ask or /scan…"
+                 aria-label="AI input" autocomplete="off" spellcheck="false">
+          <button id="ai-send" class="icon-btn" aria-label="Send">
+            <svg class="icon"><use href="#i-sync"/></svg>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Mobile overlay backdrop -->
+    <div class="backdrop" id="backdrop" hidden></div>
+
+  </div><!-- /.panels-row -->
 
 </div>
 
