@@ -17,8 +17,6 @@
   --c-hover:     #2A2D2E;   /* hover bg */
   --c-active:    #37373D;   /* active/selected bg */
   --c-focus:     #007FD4;   /* focus ring */
-  --c-accent:    #4EC9B0;   /* function/flow accent */
-  --c-module:    #C586C0;   /* module accent */
   --c-ai-ok:     #4EC9B0;   /* AI status: available */
   --c-ai-dim:    #858585;   /* AI status: unavailable */
   --c-ai-err:    #F48771;   /* AI status: error */
@@ -159,10 +157,7 @@ body {
 }
 .tree-children { overflow: hidden; }
 
-/* type accents */
-.tree-row[data-type="file"] .tree-label { color: var(--c-text); }
-.tree-row[data-type="function"] .tree-label { color: var(--c-accent); }
-.tree-row[data-type="module"] .tree-label { color: var(--c-module); }
+
 
 /* --- Resizers (FEAT-0006) ------------------------------------------------ */
 .resizer {
@@ -333,7 +328,7 @@ body {
   font-size: 12px;
 }
 .flow-step .arrow { color: var(--c-text-dim); }
-.flow-step[data-confidence="resolved"] .fn-name { color: var(--c-accent); }
+.flow-step[data-confidence="resolved"] .fn-name { color: var(--c-text); }
 .flow-step[data-confidence="unresolved"] .fn-name { color: var(--c-ai-err); }
 .flow-step[data-confidence="partial"] .fn-name { color: var(--c-text-dim); }
 

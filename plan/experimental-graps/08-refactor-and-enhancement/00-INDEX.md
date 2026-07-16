@@ -5,7 +5,7 @@
 | ID | Refactor | Status | Depends on |
 |---|---|---|---|
 | REF-0006 | [Tree structure — folder/module/file/function hierarchy](ref-0006-tree-folder-hierarchy.md) | reported | — |
-| REF-0007 | [Colors — all text #E4E4E4](ref-0007-colors-monochrome.md) | reported | — |
+| REF-0007 | [Colors — all text #E4E4E4](ref-0007-colors-monochrome.md) | done | — |
 | REF-0008 | [Layout — panel-header with split icons on right](ref-0008-layout-panel-header.md) | reported | — |
 | REF-0009 | [Icon refactor — folder.svg, file.svg, ƒ for functions](ref-0009-icon-refactor.md) | reported | REF-0006 |
 | REF-0010 | [Frontend relocation — graps/public/ → frontend/](ref-0010-frontend-relocation.md) | reported | — |

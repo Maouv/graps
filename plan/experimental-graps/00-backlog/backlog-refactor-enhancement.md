@@ -52,7 +52,7 @@
 - **Severity:** Medium — violates plan color spec (text/stroke #E4E4E4, no type-based colors)
 - **Gap:** `--c-accent: #4EC9B0` (green for functions), `--c-module: #C586C0` (pink for modules). Plan says all text #E4E4E4.
 - **Affected:** `graps/public/app.css`
-- **Status:** Open — entity pending creation (after REF-0006 review).
+- **Status:** Done — entity in `08-refactor-and-enhancement/ref-0007-colors-monochrome.md`, status: done.
 
 ## REF-0008: Layout — panel-header with split icons on right
 
