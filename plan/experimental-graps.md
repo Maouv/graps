@@ -1,7 +1,7 @@
 ```
 
 +----------------------+--------------------------------------+----------------------------+
-|  make it empty first             make it empty first                                     |
+|  make it empty first             make it empty first                                     |   <- panel-header
 |                                                               (-split-kiri) (split kanan)|
 +----------------------+--------------------------------------+----------------------------+
 |    explorer          |                 untuk nmbh tab->  +  |         Ai                 |
