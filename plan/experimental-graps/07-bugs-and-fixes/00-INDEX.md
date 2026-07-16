@@ -4,5 +4,5 @@
 
 | ID | Bug | Status | Depends on |
 |---|---|---|---|
-| BUG-0003 | [`$$` undefined — init() crash](bug-0003-init-crash-undefined-helper.md) | reported | — |
-| BUG-0004 | [`crypto.randomUUID()` fails in non-secure context](bug-0004-crypto-randomuuid-insecure-context.md) | reported | — |
+| BUG-0003 | [`$$` undefined — init() crash](bug-0003-init-crash-undefined-helper.md) | in-progress | — |
+| BUG-0004 | [`crypto.randomUUID()` fails in non-secure context](bug-0004-crypto-randomuuid-insecure-context.md) | in-progress | — |

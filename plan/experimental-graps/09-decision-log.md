@@ -2,6 +2,28 @@
 
 > **Summary Block:** SSoT seluruh keputusan penting project. Entri terbaru berada paling atas; detail capability/architecture tetap di SSoT terkait dan entri ini merekam keputusan, alasan, serta konsekuensinya.
 
+### DEC-0016: Replace crypto.randomUUID with uid() fallback for non-secure context
+- **Tanggal:** 2026-07-16
+- **Diputuskan oleh:** Freya (bug fix, BUG-0004)
+- **Konteks/Masalah:** `openTab()` used `crypto.randomUUID()` for tab IDs. This API requires secure context (HTTPS/localhost). User on Android over LAN (HTTP + non-localhost IP) → `crypto.randomUUID` is `undefined` → `TypeError` → no tab created when clicking tree nodes.
+- **Keputusan:** Add `uid()` helper: `crypto.randomUUID?.() ?? (Date.now().toString(36) + Math.random().toString(36).slice(2))`. Use `uid()` in `openTab()`.
+- **Alasan:** One-line helper, no new dependency. Optional chaining returns UUID in secure context, fallback fires only when `randomUUID` is undefined. Tab IDs are client-side only (dedup + DOM keying) — no security requirement for RFC 4122 format.
+- **Dampak/Konsekuensi:** Tabs now open on both secure and non-secure contexts. No regression on localhost. Fallback IDs are ~16 chars, not UUIDs — verified no consumer checks format.
+- **Terkait:** BUG-0004, FEAT-0013.
+
+---
+
+### DEC-0015: Remove checkAIStatus, consolidate aiAvailable into loadSettings
+- **Tanggal:** 2026-07-16
+- **Diputuskan oleh:** Freya (bug fix, BUG-0003)
+- **Konteks/Masalah:** `checkAIStatus()` fetched `/api/settings` and set `state.aiAvailable`, but also referenced deleted DOM elements (`#ai-status-dot`, `#ai-status-text`). With enrich UI removed per BUG-0003 layout cleanup, the function would throw `TypeError: Cannot set properties of null`. Keeping it meant a duplicate `/api/settings` fetch — `loadSettings()` already fetches the same endpoint.
+- **Keputusan:** Remove `checkAIStatus()` entirely. Set `state.aiAvailable = s.ai_enrichment !== false` inside `loadSettings()` (one line, same data source).
+- **Alasan:** Single source of truth. Eliminates duplicate API fetch. `state.aiAvailable` stays correct because `loadSettings()` runs first in `init()`. Ponytail: deletion over addition.
+- **Dampak/Konsekuensi:** `state.aiAvailable` correctly initialized from settings. `persistSettings()` still sends `ai_enrichment: state.aiAvailable`. No functional regression — enrich UI was already being removed.
+- **Terkait:** BUG-0003, FEAT-0014.
+
+---
+
 ### DEC-0014: Move SettingsUpdate to module level
 - **Tanggal:** 2026-07-15
 - **Diputuskan oleh:** Freya (bug fix, within TASK-0004 scope)

@@ -31,7 +31,7 @@
 - **Plan contract:** `experimental-graps.md` — panel-header with split toggle controls. `issue.md` bug #2 — panels not responsive/resizable.
 - **Affected:** `graps/public/app.js`, `graps/public/index.html`
 - **Fix:** Add `const $$ = (s) => document.querySelectorAll(s);` after line 38. Also remove X close buttons from dir-panel + ai-panel headers (replaced by panel-header split toggles). Also remove `ai-status-text` + `ai-status-dot` (enrich UI deletion per issue.md).
-- **Status:** Open — entity created in `07-bugs-and-fixes/bug-0003-init-crash-undefined-helper.md`.
+- **Status:** Fixed (commit `6becf31`) — entity in `07-bugs-and-fixes/bug-0003-init-crash-undefined-helper.md`.
 
 ## BUG-0004: `crypto.randomUUID()` fails in non-secure context — click file/function opens no tab
 
@@ -41,4 +41,4 @@
 - **Plan contract:** `experimental-graps.md` — "Clicking a file expands it to show its internal functions and opens a source code tab." `issue.md` bug #1 — click file/function doesn't summon tabs.
 - **Affected:** `graps/public/app.js`
 - **Fix:** Replace `crypto.randomUUID()` with fallback: `crypto.randomUUID?.() ?? (Date.now().toString(36) + Math.random().toString(36).slice(2))`.
-- **Status:** Open — entity created in `07-bugs-and-fixes/bug-0004-crypto-randomuuid-insecure-context.md`.
+- **Status:** Fixed (commit `2af41a8`) — entity in `07-bugs-and-fixes/bug-0004-crypto-randomuuid-insecure-context.md`.
