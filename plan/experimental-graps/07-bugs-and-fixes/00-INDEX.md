@@ -6,3 +6,4 @@
 |---|---|---|---|
 | BUG-0003 | [`$$` undefined — init() crash](bug-0003-init-crash-undefined-helper.md) | in-progress | — |
 | BUG-0004 | [`crypto.randomUUID()` fails in non-secure context](bug-0004-crypto-randomuuid-insecure-context.md) | in-progress | — |
+| BUG-0007 | [Port not released after Ctrl+C — TIME_WAIT](bug-0007-port-timewait-pre-flight.md) | done | — |

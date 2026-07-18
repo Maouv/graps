@@ -132,6 +132,9 @@ def _count_diagnostics(graph: dict[str, Any]) -> dict[str, int]:
 def _port_free(port: int, host: str = "127.0.0.1") -> bool:
     """True kalau bisa bind ``host:port`` (pre-flight check)."""
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # BUG-0007: SO_REUSEADDR agar bind tidak gagal saat port masih TIME_WAIT
+    # setelah Ctrl+C. Uvicorn sudah set ini di server socket-nya.
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         s.bind((host, port))
         return True

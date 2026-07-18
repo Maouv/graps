@@ -75,7 +75,7 @@
 - **Root cause:** `_port_free()` in `cli.py` (line 132–141) binds a socket to check port availability but does NOT set `SO_REUSEADDR`. After `server.run()` stops (Ctrl+C), the port enters `TIME_WAIT` (typically 60s). Next run's `_port_free()` tries `bind()` → fails with `EADDRINUSE` on TIME_WAIT socket → reports "Port already in use" even though no process is listening. `ss -tlnp` only shows LISTEN sockets, so it appears empty.
 - **Affected:** `graps/cli.py` — `_port_free()` function
 - **Fix:** Add `s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)` before `s.bind()`. One-line fix. Uvicorn already sets `SO_REUSEADDR` on its server socket, so only the pre-flight check is broken.
-- **Status:** Open — pending fix.
+- **Status:** Fixed — `setsockopt(SO_REUSEADDR, 1)` added to `_port_free()`. Entity in `07-bugs-and-fixes/bug-0007-port-timewait-pre-flight.md`.
 
 ## BUG-0008: Mobile panels cover workspace — should be 3-column (dir|workspace|ai) on all devices
 
