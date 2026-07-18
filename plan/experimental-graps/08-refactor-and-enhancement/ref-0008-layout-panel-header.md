@@ -4,7 +4,7 @@ type: refactor
 status: done
 owner: Maou
 created: 2026-07-16
-updated: 2026-07-16
+updated: 2026-07-18
 depends_on: []
 related: [BUG-0003, REF-0006, REF-0007]
 ---
@@ -187,17 +187,18 @@ Remove `.split-actions` styles (lines 263–268) — dead code after buttons mov
 
 ### 3c. Mobile CSS update
 
-At ≤1024px, panels become fixed drawers. The `.top-bar` stays visible above. No structural change needed — `.panels-row` contains the workspace + drawer panels. Update:
+> **Superseded by BUG-0008 (2026-07-18):** the drawer pattern described below was removed. Panels are now 3-column flex on ALL devices — no `position: fixed`, no backdrop. `.top-bar` stays visible above. Current mobile CSS:
 
 ```css
 @media (max-width: 1024px) {
-  /* .top-bar stays visible — split buttons accessible on mobile */
-  .panels-row { position: relative; }
-  /* drawer panels unchanged — still fixed position */
+  :root { --dir-w: 140px; --ai-w: 160px; }  /* narrower defaults, panels stay in flex flow */
+}
+@media (max-width: 640px) {
+  :root { --dir-w: 100px; --ai-w: 110px; }
 }
 ```
 
-At ≤640px, remove `.split-actions { gap: 0; }` — dead code.
+Historical note: original plan had `.panels-row { position: relative; }` with fixed drawer panels at ≤1024px — that behavior was a plan deviation fixed by BUG-0003-era mobile work and later removed entirely by BUG-0008. The `.split-actions { gap: 0; }` removal at ≤640px still applied (dead code).
 
 ### 3d. JS — app.js
 
@@ -207,7 +208,7 @@ No JS changes needed. `$$('.split-btn')` selector is global — finds buttons re
 
 - **Komponen terdampak:** `graps/public/index.html`, `graps/public/app.css`
 - **Blast Radius:** Medium. DOM restructure (wrapping panels in `.panels-row`) + CSS layout direction change. No JS changes. No backend/scanner changes.
-- **Impact on mobile:** `.top-bar` is always visible — split toggle buttons accessible on mobile. Panels still become drawers at ≤1024px. `.panels-row` becomes the container.
+- **Impact on mobile:** `.top-bar` is always visible — split toggle buttons accessible on mobile. ~~Panels still become drawers at ≤1024px~~ — superseded by BUG-0008: panels stay 3-column flex on all devices. `.panels-row` is the container.
 - **Impact on `:has()` selectors:** `.app:has(#dir-panel[data-open="false"]) #resizer-left` still works — `.panels-row` is inside `.app`, so `:has()` traverses descendants. No change needed.
 - **Impact on BUG-0003:** X close button deletion and enrich UI deletion are in BUG-0003's scope. REF-0008 only handles the structural move. Both can be done independently — if REF-0008 lands first, X buttons still exist but are in the panel headers (not the top bar). If BUG-0003 lands first, X buttons are gone but split buttons still in workspace toolbar. Either order works.
 - **Layout refinements deferred:** User noted "my layout its wrong its very wrong, after this i want to update it." This entity covers the structural move only (top bar + split button relocation). Detailed layout refinements (heights, spacing, panel-header content) are a future entity.
