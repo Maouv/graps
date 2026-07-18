@@ -348,9 +348,6 @@ function togglePanel(name) {
     img.dataset.state = state.panels[name] ? 'select' : 'unselect';
     img.src = `/icon/split-horizontal-right-${img.dataset.state}.svg`;
   }
-  // mobile backdrop
-  if (isMobile() && state.panels[name]) showBackdrop();
-  else hideBackdrop();
   persistSettings();
 }
 
@@ -370,7 +367,7 @@ function initResizers() {
     r.addEventListener('pointermove', (e) => {
       if (!dragging) return;
       const delta = side === 'left' ? e.clientX - startX : startX - e.clientX;
-      const w = Math.round(Math.max(200, Math.min(600, startW + delta)));
+      const w = Math.round(Math.max(80, Math.min(600, startW + delta)));
       state.widths[name] = w;
       applyWidth(name);
     });
@@ -381,7 +378,7 @@ function initResizers() {
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault();
         const dir = (side === 'left' ? 1 : -1) * (e.key === 'ArrowRight' ? 10 : -10);
-        state.widths[name] = Math.max(200, Math.min(600, state.widths[name] + dir));
+        state.widths[name] = Math.max(80, Math.min(600, state.widths[name] + dir));
         applyWidth(name);
       }
     });
@@ -390,7 +387,6 @@ function initResizers() {
 
 function applyWidth(name) {
   const panel = $(name === 'dir' ? '#dir-panel' : '#ai-panel');
-  if (isMobile()) return;
   panel.style.width = state.widths[name] + 'px';
 }
 
@@ -444,8 +440,8 @@ async function loadSettings() {
     state.settings = s;
     state.aiAvailable = s.ai_enrichment !== false;
     if (s.panel_widths) {
-      state.widths.dir = clampW(s.panel_widths.dir) || 280;
-      state.widths.ai = clampW(s.panel_widths.ai) || 320;
+      state.widths.dir = clampW(s.panel_widths.dir) || state.widths.dir;
+      state.widths.ai = clampW(s.panel_widths.ai) || state.widths.ai;
     }
     applyWidth('dir'); applyWidth('ai');
     // BUG-0006: tabs NOT restored from settings — clean slate on page load.
@@ -483,15 +479,8 @@ function isMobile() {
   return window.innerWidth <= 1024;
 }
 
-function showBackdrop() {
-  const b = $('#backdrop');
-  b.hidden = false;
-  b.onclick = () => {
-    if (state.panels.dir) togglePanel('dir');
-    if (state.panels.ai) togglePanel('ai');
-  };
-}
-function hideBackdrop() { $('#backdrop').hidden = true; }
+function showBackdrop() { /* ponytail: backdrop removed in BUG-0008 — 3-column on all devices */ }
+function hideBackdrop() { /* ponytail: backdrop removed in BUG-0008 */ }
 
 /* --- Utilities ------------------------------------------------------------ */
 function esc(s) {
@@ -501,7 +490,7 @@ function esc(s) {
 }
 function clampW(w) {
   w = Number(w);
-  return (w >= 200 && w <= 600) ? w : null;
+  return (w >= 80 && w <= 600) ? w : null;
 }
 
 /* --- Init ----------------------------------------------------------------- */
@@ -539,15 +528,9 @@ async function init() {
   send.addEventListener('click', submit);
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
 
-  // mobile: start with panels closed — drawers, not columns (REF-0008)
-  if (isMobile()) {
-    togglePanel('dir');
-    togglePanel('ai');
-  }
-
   // responsive: re-check on resize
   window.addEventListener('resize', () => {
-    if (!isMobile()) { applyWidth('dir'); applyWidth('ai'); hideBackdrop(); }
+    applyWidth('dir'); applyWidth('ai');
   });
 }
 

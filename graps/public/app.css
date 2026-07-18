@@ -438,44 +438,17 @@ body {
 .app:has(#ai-panel[data-open="false"]) #resizer-right { display: none; }
 
 /* --- Responsive (FEAT-0007) ---------------------------------------------- */
-/* Tablet: ≤1024px — drawers, not 3 columns */
+/* ≤1024px — same 3-column layout, narrower panels (BUG-0008) */
 @media (max-width: 1024px) {
-  /* top bar always visible above panels + backdrop (REF-0008 mobile fix) */
+  /* top bar above panels (REF-0008) */
   .top-bar { z-index: 110; }
-  .dir-panel, .ai-panel {
-    position: fixed;
-    top: var(--header-h);
-    bottom: 0;
-    z-index: 100;
-    width: 80vw !important;
-    max-width: 360px;
-  }
-  .dir-panel { left: 0; border-right: 1px solid var(--c-border); }
-  .ai-panel  { right: 0; border-left: 1px solid var(--c-border); }
-  .resizer { display: none; }
-  .panel[data-open="false"] { transform: translateX(0); display: flex; }
-  .dir-panel[data-open="false"] { transform: translateX(-100%); }
-  .ai-panel[data-open="false"]  { transform: translateX(100%); }
-  .dir-panel, .ai-panel {
-    transition: transform .2s ease;
-  }
-  .backdrop {
-    position: fixed;
-    top: var(--header-h);
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0,0,0,.5);
-    z-index: 90;
-    cursor: pointer;
-  }
-  .backdrop[hidden] { display: none; }
-  .workspace { width: 100%; }
+  :root { --dir-w: 140px; --ai-w: 160px; --panel-min: 80px; }
+  .panel { min-width: 80px; }
 }
 
-/* Phone: ≤640px — one overlay at a time */
+/* Phone: ≤640px — tighter panels + tabs */
 @media (max-width: 640px) {
-  .dir-panel, .ai-panel { width: 85vw !important; max-width: 320px; }
+  :root { --dir-w: 100px; --ai-w: 110px; }
   .tab { min-width: 100px; }
   .tab-label { font-size: 11px; }
   .workspace-toolbar { padding: 0; }
