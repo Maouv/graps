@@ -276,10 +276,8 @@ async function renderSource(tab, c) {
 
 /* --- Flow view (FEAT-0011) ----------------------------------------------- */
 async function renderFlow(tab, c) {
-  // flow ID = <file_id>#call_sequence
-  const fnId = tab.entityId;
-  const fileFn = fnId.split('::');
-  const flowId = `${fileFn[0]}#call_sequence`;
+  // flow ID = <full_fn_id>#call_sequence
+  const flowId = `${tab.entityId}#call_sequence`;
   const flow = await api(`/api/flows/${encodeURIComponent(flowId)}`);
   const steps = flow.steps || [];
   c.innerHTML = '<div class="flow-view"></div>';

@@ -53,7 +53,7 @@
 - **Affected:** `graps/public/app.js` — `renderFlow()` line 278–303
 - **Pre-existing:** NOT caused by REF-0006. REF-0006 only changed tree structure (folder trie); function node `id` passed to `openTab` is unchanged (`fn.id`, full function id). Bug exists since flow tab was written.
 - **Fix:** Line 282 — use full `tab.entityId` instead of `fileFn[0]`: `const flowId = \`${tab.entityId}#call_sequence\`;` (drop the `split('::')` + `[0]` indirection entirely).
-- **Status:** Open — pending fix.
+- **Status:** Fixed — `renderFlow()` now uses full `tab.entityId` directly (commit `a4cd9ff`).
 
 ## BUG-0006: Tabs persist across server restarts — no way to clear stale tabs
 
