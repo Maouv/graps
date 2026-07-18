@@ -66,7 +66,7 @@
   - **A:** Clear tabs on server restart — don't restore tabs from settings on `loadSettings()` (remove the tab-restore block, lines 453–462). Loses session-restore across browser refresh.
   - **B:** Add explicit "close all tabs" action (button or /scan command) — keeps persistence, gives user control.
   - **C:** Verify closeTab works correctly first — if persistence is the only issue, the fix may just be clearing settings on startup.
-- **Status:** Open — pending investigation + user decision on expected persistence scope.
+- **Status:** Fixed — Option A. Removed tab-restore block from `loadSettings()` (lines 452–462). Tabs start empty on every page load. `persistTabs()` still writes (harmless, no reader). Clean slate on restart + browser refresh.
 
 ## BUG-0007: Port not released after Ctrl+C — pre-flight check fails on TIME_WAIT
 

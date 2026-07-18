@@ -448,19 +448,8 @@ async function loadSettings() {
       state.widths.ai = clampW(s.panel_widths.ai) || 320;
     }
     applyWidth('dir'); applyWidth('ai');
-    // restore tabs (FEAT-0013)
-    if (s.tabs && s.tabs.length) {
-      for (const t of s.tabs) {
-        try {
-          state.tabs.push({ ...t, preview: false });
-        } catch { /* fail safely on deleted entities */ }
-      }
-      if (state.tabs.length) {
-        state.activeTabId = state.tabs[0].id;
-        renderTabs();
-        renderTabContent(state.tabs[0]);
-      }
-    }
+    // BUG-0006: tabs NOT restored from settings — clean slate on page load.
+    // persistTabs() still writes for future session-restore feature; see backlog.
   } catch { /* safe fallback — defaults */ }
 }
 
