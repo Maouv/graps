@@ -607,7 +607,7 @@ def create_app(
         member_functions = [f["id"] for f in fns if f.get("module_id") == module_id]
         return {**mod, "member_files": member_files, "member_functions": member_functions}
 
-    @app.get("/api/flows/{flow_id:path}")
+    @app.get("/api/flows/{flow_id}")
     def get_flow(flow_id: str) -> Any:
         """Flow view — steps for a resolved flow (call_sequence MVP)."""
         flows = graph_data.get("flows") or []

@@ -124,7 +124,6 @@ def build_call_edges_and_flows(
                 edge = {
                     "source": src,
                     "target": target,
-                    "name": call.name,
                     "kind": "call",
                     "order": order,
                     "line": call.line,
