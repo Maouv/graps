@@ -275,12 +275,6 @@ async function renderSource(tab, c) {
 }
 
 /* --- Flow view (FEAT-0011) ----------------------------------------------- */
-function humanize(name) {
-  return String(name || '')
-    .replace(/[._]/g, ' ')
-    .replace(/\b\w/g, (ch) => ch.toUpperCase());
-}
-
 async function renderFlow(tab, c) {
   // flow ID = <full_fn_id>#call_sequence
   const flowId = `${tab.entityId}#call_sequence`;
@@ -292,67 +286,17 @@ async function renderFlow(tab, c) {
     view.innerHTML = '<p class="empty-state">No flow steps found.</p>';
     return;
   }
-
-  // header
-  const title = document.createElement('div');
-  title.className = 'flow-title';
-  title.textContent = `${tab.title}()`;
-  view.append(title);
-
-  // goal (heuristic, structural — not AI-generated)
-  const goal = document.createElement('div');
-  goal.className = 'flow-goal';
-  goal.innerHTML = `<h3>Goal</h3><p>${esc(humanize(tab.title))}</p>`;
-  view.append(goal);
-
-  // sequence
-  const seq = document.createElement('div');
-  seq.className = 'flow-sequence';
   for (let i = 0; i < steps.length; i++) {
     const s = steps[i];
     const conf = s.confidence || 'resolved';
-    if (i > 0) {
-      const arrow = document.createElement('div');
-      arrow.className = 'flow-arrow';
-      arrow.textContent = '↓';
-      seq.append(arrow);
-    }
     const div = document.createElement('div');
     div.className = 'flow-step';
     div.dataset.confidence = conf;
     div.innerHTML =
-      `<span class="fn-name">${esc(s.name || '?')}</span>` +
+      (i > 0 ? '<span class="arrow">→</span>' : '<span class="arrow">●</span>') +
+      `<span class="fn-name">${esc(s.callee || s.name || '?')}</span>` +
       `<span class="dim">${esc(conf)}</span>`;
-    seq.append(div);
-  }
-  view.append(seq);
-
-  // functions — distinct resolved call targets
-  const fns = new Map();
-  const files = new Set();
-  for (const s of steps) {
-    if (!s.target) continue;
-    const [file, qname] = s.target.split('::');
-    if (file) files.add(file);
-    if (qname) fns.set(s.target, qname.split('.').pop());
-  }
-  if (fns.size) {
-    const sec = document.createElement('div');
-    sec.className = 'flow-section';
-    sec.innerHTML = `<h3>Functions</h3><ul>${
-      [...fns.values()].map((n) => `<li>✓ ${esc(n)}()</li>`).join('')
-    }</ul>`;
-    view.append(sec);
-  }
-
-  // files — distinct files referenced by resolved targets
-  if (files.size) {
-    const sec = document.createElement('div');
-    sec.className = 'flow-section';
-    sec.innerHTML = `<h3>Files</h3><ul>${
-      [...files].map((f) => `<li>${esc(f)}</li>`).join('')
-    }</ul>`;
-    view.append(sec);
+    view.append(div);
   }
 }
 
