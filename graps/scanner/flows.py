@@ -9,10 +9,11 @@ complete runtime control flow (DEC-0005).
 
 Resolution rules (MVP):
   ``self.x`` / ``cls.x`` -> method ``x`` in the same enclosing class.
-  bare ``name``           -> same-file function named ``name``; else a function
-                             named ``name`` reachable via ``from <pkg> import name``.
+  bare ``name``           -> same-file function or class named ``name``; else a
+                             function/class named ``name`` reachable via
+                             ``from <pkg> import name``.
   ``X.attr``              -> ``from <pkg> import X``-style import resolving to a
-                             file that defines ``attr``.
+                             file that defines ``attr`` as a function or class.
   everything else         -> unresolved (external/dynamic/attribute dispatch).
 """
 from __future__ import annotations
@@ -21,23 +22,36 @@ from pathlib import Path
 from typing import Any
 
 from graps.scanner import ParsedFile
-from graps.scanner.ids import flow_id, function_id, to_posix_rel
+from graps.scanner.ids import class_id, flow_id, function_id, to_posix_rel
 from graps.scanner.resolver import resolve_import
 
 
 def _build_indexes(
     results: list[ParsedFile], root: Path
-) -> tuple[dict[str, list], dict[str, list[str]]]:
-    """file_id -> [ParsedFunction]; short name -> [function_ids]."""
+) -> tuple[dict[str, list], dict[str, list[dict]], dict[str, list[str]]]:
+    """file_id -> [ParsedFunction]; file_id -> [class dict]; short name -> [ids].
+
+    Classes are indexed alongside functions (FEAT-0017 follow-up) so a
+    constructor call (``Foo()``) can resolve to the class definition the same
+    way a function call resolves to a function definition.
+    """
     file_funcs: dict[str, list] = {}
+    file_classes: dict[str, list[dict]] = {}
     name_to_ids: dict[str, list[str]] = {}
     for r in results:
         rel = r.id or to_posix_rel(r.path, root)
         file_funcs[rel] = r.functions
+        file_classes[rel] = r.classes
         for f in r.functions:
             fid = function_id(rel, f.qualified_name)
             name_to_ids.setdefault(f.name, []).append(fid)
-    return file_funcs, name_to_ids
+        for cls in r.classes:
+            qn = cls.get("qualified_name") or cls.get("name", "")
+            if not qn:
+                continue
+            cid = class_id(rel, qn)
+            name_to_ids.setdefault(cls["name"], []).append(cid)
+    return file_funcs, file_classes, name_to_ids
 
 
 def _resolved_import_files(result: ParsedFile, root: Path) -> list[tuple[str, str, str]]:
@@ -58,6 +72,7 @@ def _resolved_import_files(result: ParsedFile, root: Path) -> list[tuple[str, st
 def _resolve_call(
     name: str, calling: Any, rel: str,
     file_funcs: dict[str, list],
+    file_classes: dict[str, list[dict]],
     name_to_ids: dict[str, list[str]],
     imported_files: list[tuple[str, str, str]],
 ) -> tuple[str | None, list[str], str | None]:
@@ -71,7 +86,8 @@ def _resolve_call(
                 return function_id(rel, f.qualified_name), [], None
         return None, [function_id(rel, f.qualified_name) for f in same], "method_not_in_class"
 
-    # X.attr -> from-import whose local name == X resolving to a file defining attr.
+    # X.attr -> from-import whose local name == X resolving to a file defining
+    # attr as a function or a class (constructor call, e.g. ``mod.Foo()``).
     if "." in name:
         base, attr = name.rsplit(".", 1)
         for last, rrel, _target in imported_files:
@@ -79,17 +95,26 @@ def _resolve_call(
                 target_f = next((f for f in file_funcs.get(rrel, []) if f.name == attr), None)
                 if target_f is not None:
                     return function_id(rrel, target_f.qualified_name), [], None
+                target_c = next((c for c in file_classes.get(rrel, []) if c["name"] == attr), None)
+                if target_c is not None:
+                    return class_id(rrel, target_c.get("qualified_name") or target_c.get("name", "")), [], None
         return None, name_to_ids.get(attr, []), "attribute_call_unresolved"
 
-    # bare name -> same-file function, else from-import named `name`.
+    # bare name -> same-file function/class, else from-import named `name`.
     same = [f for f in file_funcs.get(rel, []) if f.name == name]
     if same:
         return function_id(rel, same[0].qualified_name), [], None
+    same_cls = [c for c in file_classes.get(rel, []) if c["name"] == name]
+    if same_cls:
+        return class_id(rel, same_cls[0].get("qualified_name") or same_cls[0].get("name", "")), [], None
     for last, rrel, _target in imported_files:
         if last == name:
             target_f = next((f for f in file_funcs.get(rrel, []) if f.name == name), None)
             if target_f is not None:
                 return function_id(rrel, target_f.qualified_name), [], None
+            target_c = next((c for c in file_classes.get(rrel, []) if c["name"] == name), None)
+            if target_c is not None:
+                return class_id(rrel, target_c.get("qualified_name") or target_c.get("name", "")), [], None
     return None, name_to_ids.get(name, []), "unqualified_name_not_in_scope"
 
 
@@ -102,7 +127,7 @@ def build_call_edges_and_flows(
     unresolved_reason. flows: one ``call_sequence`` per function that makes >=1
     call, steps mirroring its call edges in source order.
     """
-    file_funcs, name_to_ids = _build_indexes(results, root)
+    file_funcs, file_classes, name_to_ids = _build_indexes(results, root)
     call_edges: list[dict[str, Any]] = []
     flows: list[dict[str, Any]] = []
 
@@ -117,7 +142,7 @@ def build_call_edges_and_flows(
             resolved_any = False
             for order, call in enumerate(func.calls):
                 target, candidates, reason = _resolve_call(
-                    call.name, func, rel, file_funcs, name_to_ids, imported_files
+                    call.name, func, rel, file_funcs, file_classes, name_to_ids, imported_files
                 )
                 if target:
                     resolved_any = True

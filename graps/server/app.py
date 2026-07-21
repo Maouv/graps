@@ -609,12 +609,25 @@ def create_app(
 
     @app.get("/api/flows/{flow_id:path}")
     def get_flow(flow_id: str) -> Any:
-        """Flow view — steps for a resolved flow (call_sequence MVP)."""
+        """Flow view — steps for a resolved flow (call_sequence MVP).
+
+        A function that makes zero calls has no ``call_sequence`` entry at
+        all (flows.py only emits one per function with >=1 call site) — that
+        is a valid, empty flow, not a missing one. Only 404 when the root
+        function/entity id itself doesn't exist in the graph.
+        """
         flows = graph_data.get("flows") or []
         flow = next((f for f in flows if f.get("id") == flow_id), None)
-        if flow is None:
-            return JSONResponse({"error": "Flow not found"}, status_code=404)
-        return flow
+        if flow is not None:
+            return flow
+        root_id = flow_id.rsplit("#", 1)[0]
+        fns = (graph_data.get("nodes") or {}).get("functions") or []
+        if any(f.get("id") == root_id for f in fns):
+            return {
+                "id": flow_id, "kind": "call_sequence", "root_id": root_id,
+                "confidence": "resolved", "steps": [],
+            }
+        return JSONResponse({"error": "Flow not found"}, status_code=404)
 
     # --- Static frontend (FEAT-0001 shell) ---------------------------------
     # ponytail: mount public/ at root. API routes registered above take

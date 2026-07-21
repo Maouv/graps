@@ -281,6 +281,19 @@ function humanize(name) {
     .replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 
+// Confidence is a structural fact, not a failure: most "unresolved" calls are
+// builtin/stdlib/external-library calls that the deterministic resolver can
+// never trace without type inference (DEC-0005). Label by reason so it reads
+// as "outside project scope", not "broken".
+function confLabel(step) {
+  const conf = step.confidence || 'resolved';
+  if (conf === 'resolved') return 'resolved';
+  if (conf === 'partial') return 'partial';
+  if (step.unresolved_reason === 'method_not_in_class') return 'not in class';
+  // attribute_call_unresolved / unqualified_name_not_in_scope
+  return 'external / builtin';
+}
+
 async function renderFlow(tab, c) {
   // flow ID = <full_fn_id>#call_sequence
   const flowId = `${tab.entityId}#call_sequence`;
@@ -322,7 +335,7 @@ async function renderFlow(tab, c) {
     div.dataset.confidence = conf;
     div.innerHTML =
       `<span class="fn-name">${esc(s.name || '?')}</span>` +
-      `<span class="dim">${esc(conf)}</span>`;
+      `<span class="dim">${esc(confLabel(s))}</span>`;
     seq.append(div);
   }
   view.append(seq);
