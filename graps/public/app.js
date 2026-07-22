@@ -295,6 +295,14 @@ function confLabel(step) {
 }
 
 async function renderFlow(tab, c) {
+  // Check for source_only marker first (flow-worthiness taxonomy)
+  const soId = `${tab.entityId}#source_only`;
+  const soFlow = await api(`/api/flows/${encodeURIComponent(soId)}`);
+  if (soFlow && soFlow.kind === 'source_only') {
+    c.innerHTML = `<div class="flow-view"><div class="source-only-label">${esc(soFlow.label || 'source only')}</div></div>`;
+    return;
+  }
+
   // flow ID = <full_fn_id>#call_sequence
   const flowId = `${tab.entityId}#call_sequence`;
   const flow = await api(`/api/flows/${encodeURIComponent(flowId)}`);
