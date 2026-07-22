@@ -18,12 +18,125 @@ Resolution rules (MVP):
 """
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from graps.scanner import ParsedFile
+from graps.scanner import ParsedFile, ParsedFunction
 from graps.scanner.ids import class_id, flow_id, function_id, to_posix_rel
 from graps.scanner.resolver import resolve_import
+
+# --- Flow-worthiness taxonomy (spike-flow-classification.md, 10 rows) ---------
+
+@dataclass
+class Classification:
+    """Flow-worthiness classification result.
+
+    ``category``     : taxonomy row short name (e.g. "1or2_trivial", "3_delegator").
+    ``flow_worthy``  : should the Flow tab render for this function?
+    ``label``        : Source-tab label when flow_worthy=False.
+    ``reason``       : one-line structural justification.
+    """
+    category: str
+    flow_worthy: bool
+    label: str
+    reason: str
+
+
+_CONTROL_KINDS = {"if", "for", "while", "try", "except"}
+
+
+def _is_stub(func: ParsedFunction, body: str, has_control: bool) -> str | None:
+    """Return stub label if the function is a stub/empty, else None.
+
+    ponytail: body-text stub detection — parser doesn't expose body AST here.
+    Regex + substring checks with n_calls==0 guard to limit false positives.
+    Upgrade path: extend ParsedFunction with is_stub flag (parser-level).
+    """
+    if has_control:
+        return None
+    # raise NotImplementedError() — call-name check, no body text needed.
+    if any("NotImplementedError" in c.name for c in func.calls):
+        return "not implemented"
+    if not body or func.calls:
+        return None
+    # Body-text markers — only for 0-call functions (else real code with a
+    # TODO comment or a string containing "pass" would false-positive).
+    if "NotImplementedError" in body or "TODO" in body:
+        return "not implemented"
+    if re.search(r"^\s*pass\s*$", body, re.MULTILINE):
+        return "stub"
+    if re.search(r"^\s*\.\.\.\s*$", body, re.MULTILINE):
+        return "stub"
+    return None
+
+
+def classify_flow_worthiness(func: ParsedFunction, body: str) -> Classification:
+    """Classify a function per the flow-worthiness taxonomy (10 rows).
+
+    Pure, deterministic, no I/O. See spike-flow-classification.md for the
+    taxonomy table and the two v2 refinements applied here:
+      - Cat 4: collapse chained method calls on one line to 1 logical call.
+      - Cat 7: require calls in a return/control context, not bare expressions.
+      - Cat 10: route NotImplementedError stubs here, not cat 7.
+    """
+    calls = func.calls
+    branch_kinds = {b.kind for b in func.branches}
+    has_control = bool(branch_kinds & _CONTROL_KINDS)
+    has_return = "return" in branch_kinds
+    has_route = bool(func.routes)
+    return_lines = {b.line for b in func.branches if b.kind == "return"}
+
+    # v2 refinement 1: chained method calls on one line count as 1 logical call.
+    n_logical = len({c.line for c in calls})
+    # v2 refinement 2: is any call inside a return statement?
+    calls_in_return = any(c.line in return_lines for c in calls)
+
+    # Cat 10: stub / not implemented.
+    stub = _is_stub(func, body, has_control)
+    if stub is not None:
+        return Classification("10_stub", False, stub, "empty body / NotImplementedError")
+
+    # Cats 1+2: pure/trivial or data definition (no calls, no control, no routes).
+    if not calls and not has_control and not has_route:
+        return Classification("1or2_trivial", False, "pure function",
+                              "no calls, no branches, no routes")
+
+    # Cat 3: delegator — 1 logical call, immediately returned, no control.
+    if n_logical == 1 and has_return and not has_control and not has_route:
+        return Classification("3_delegator", False, "delegator", "single call returned")
+
+    # v2 refinement 2: bare-expression call (not in return, no control) → trivial.
+    if calls and not has_control and not has_route and not calls_in_return:
+        return Classification("1or2_trivial", False, "pure function",
+                              "bare expression call, not returned")
+
+    # Cat 4: linear sequence — ≥2 logical calls, no control.
+    if n_logical >= 2 and not has_control and not has_route:
+        return Classification("4_linear", True, "linear sequence", "≥2 sequential calls")
+
+    # Cats 5/6/8: control flow present.
+    if has_control:
+        if "if" in branch_kinds:
+            return Classification("5_branch", True, "branching logic", "if/elif/else")
+        if "for" in branch_kinds or "while" in branch_kinds:
+            return Classification("6_loop", True, "loop/iteration", "for/while")
+        return Classification("8_error", True, "error handling", "try/except")
+
+    # Cat 7: unresolved call in context — partial, flow-worthy.
+    # ponytail: after v2 refinements this is a catch-all; most paths hit cats
+    # 1-6/8/10 above. Kept so any uncategorised call-bearing function still
+    # gets a Flow tab (show-what's-known) rather than an empty Source fallback.
+    if calls:
+        return Classification("7_unresolved", True, "unresolved call",
+                              "partial — show what's known")
+
+    # Fallback: routes or mixed markers — flow-worthy.
+    return Classification("misc_flow", True, "mixed markers", "routes or mixed markers")
+
+
+# --- Indexes + resolution (unchanged) ----------------------------------------
 
 
 def _build_indexes(
@@ -121,11 +234,14 @@ def _resolve_call(
 def build_call_edges_and_flows(
     results: list[ParsedFile], root: Path
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Return (call_edges, call_sequence flows) for the whole project.
+    """Return (call_edges, flows) for the whole project.
 
     call_edges: ordered, deterministic, with kind/confidence/target/candidates/
-    unresolved_reason. flows: one ``call_sequence`` per function that makes >=1
-    call, steps mirroring its call edges in source order.
+    unresolved_reason. flows: one ``call_sequence`` per flow-worthy function
+    that makes >=1 call (steps mirroring its call edges in source order); one
+    ``source_only`` marker per not-flow-worthy function so the frontend renders
+    a Source tab with a category-specific label instead of "no flow step found"
+    (spike-flow-classification.md).
     """
     file_funcs, file_classes, name_to_ids = _build_indexes(results, root)
     call_edges: list[dict[str, Any]] = []
@@ -134,10 +250,36 @@ def build_call_edges_and_flows(
     for result in sorted(results, key=lambda r: r.id or to_posix_rel(r.path, root)):
         rel = result.id or to_posix_rel(result.path, root)
         imported_files = _resolved_import_files(result, root)
+        # Read source once per file for body-text stub detection. The taxonomy
+        # classifier is pure (no I/O); the caller provides the body.
+        try:
+            src_lines = result.path.read_text(errors="replace").splitlines()
+        except OSError:
+            src_lines = []
         for func in result.functions:
+            src = function_id(rel, func.qualified_name)
+            ls = func.line_start or func.lineno
+            le = func.line_end or ls
+            body = "\n".join(src_lines[ls - 1:le]) if src_lines and ls > 0 else ""
+            cls = classify_flow_worthiness(func, body)
+
+            if not cls.flow_worthy:
+                # Skip call_sequence emission; emit a source_only marker so the
+                # frontend renders Source tab with a category-specific label.
+                flows.append({
+                    "id": flow_id(src, "source_only"),
+                    "kind": "source_only",
+                    "root_id": src,
+                    "label": cls.label,
+                    "category": cls.category,
+                })
+
             if not func.calls:
                 continue
-            src = function_id(rel, func.qualified_name)
+
+            # Call edges are emitted for the graph view regardless of
+            # flow_worthy — a delegator's single call still belongs in the
+            # call graph even though its Flow tab is suppressed.
             steps: list[dict[str, Any]] = []
             resolved_any = False
             for order, call in enumerate(func.calls):
@@ -158,18 +300,20 @@ def build_call_edges_and_flows(
                     "unresolved_reason": reason,
                 }
                 call_edges.append(edge)
-                steps.append(edge)
-            all_resolved = all(s["confidence"] == "resolved" for s in steps)
-            flow_confidence = "resolved" if (resolved_any and all_resolved) else (
-                "partial" if resolved_any else "unresolved"
-            )
-            flows.append({
-                "id": flow_id(src, "call_sequence"),
-                "kind": "call_sequence",
-                "root_id": src,
-                "confidence": flow_confidence,
-                "steps": steps,
-            })
+                if cls.flow_worthy:
+                    steps.append(edge)
+            if cls.flow_worthy:
+                all_resolved = all(s["confidence"] == "resolved" for s in steps)
+                flow_confidence = "resolved" if (resolved_any and all_resolved) else (
+                    "partial" if resolved_any else "unresolved"
+                )
+                flows.append({
+                    "id": flow_id(src, "call_sequence"),
+                    "kind": "call_sequence",
+                    "root_id": src,
+                    "confidence": flow_confidence,
+                    "steps": steps,
+                })
 
     return call_edges, flows
 
@@ -263,19 +407,75 @@ if __name__ == "__main__":
         # self.helper_method -> C.helper_method (same class); helper() -> sub.helper (from-import)
         assert any(t and t.endswith("::main.C.helper_method") for t in resolved), resolved
         assert any(t and t.endswith("pkg/sub.py::sub.helper") for t in resolved), resolved
-        # only C.m makes calls -> one flow, two resolved steps -> confidence resolved
-        assert len(flows) == 1, [f["root_id"] for f in flows]
-        assert flows[0]["root_id"].endswith("::main.C.m"), flows[0]["root_id"]
-        assert flows[0]["confidence"] == "resolved", flows[0]["confidence"]
+        # C.m: 2 calls on 2 lines, no control -> cat 4 (linear, flow-worthy).
+        call_seq = [f for f in flows if f["kind"] == "call_sequence"]
+        assert len(call_seq) == 1, [f["root_id"] for f in call_seq]
+        assert call_seq[0]["root_id"].endswith("::main.C.m"), call_seq[0]["root_id"]
+        assert call_seq[0]["confidence"] == "resolved", call_seq[0]["confidence"]
+        # helper: 0 calls, return 1 -> cat 1/2 (trivial) -> source_only.
+        # helper_method: 0 calls, return 2 -> cat 1/2 (trivial) -> source_only.
+        source_only = [f for f in flows if f["kind"] == "source_only"]
+        assert len(source_only) == 2, [(f["root_id"], f["label"]) for f in source_only]
+        assert all(f["label"] == "pure function" for f in source_only), source_only
 
-        # unresolvable call stays unresolved with a reason.
-        (pkg / "dyn.py").write_text("def f():\n    return external_thing()\n")
+        # Stub detection: pass body -> "stub"; raise NotImplementedError -> "not implemented".
+        (pkg / "stub.py").write_text(
+            "def empty():\n    pass\n"
+            "def todo():\n    raise NotImplementedError\n"
+            "def impl():\n    return NotImplementedError()\n"
+        )
         r2 = [safe_parse(p) for p in sorted(root.rglob("*.py"))]
         for r in r2:
             r.id = to_posix_rel(r.path, root)
-        e2, _ = build_call_edges_and_flows(r2, root)
-        ext = [e for e in e2 if e["source"].endswith("pkg/dyn.py::dyn.f")]
+        _, f2 = build_call_edges_and_flows(r2, root)
+        so2 = {f["root_id"].rsplit("::", 1)[-1]: f for f in f2 if f["kind"] == "source_only"}
+        assert "stub.empty" in so2 and so2["stub.empty"]["label"] == "stub", so2
+        assert "stub.todo" in so2 and so2["stub.todo"]["label"] == "not implemented", so2
+        assert "stub.impl" in so2 and so2["stub.impl"]["label"] == "not implemented", so2
+
+        # Delegator: return external_thing() -> source_only, edge still unresolved.
+        (pkg / "dyn.py").write_text("def f():\n    return external_thing()\n")
+        r3 = [safe_parse(p) for p in sorted(root.rglob("*.py"))]
+        for r in r3:
+            r.id = to_posix_rel(r.path, root)
+        e3, f3 = build_call_edges_and_flows(r3, root)
+        ext = [e for e in e3 if e["source"].endswith("pkg/dyn.py::dyn.f")]
         assert ext and ext[0]["confidence"] == "unresolved" and ext[0]["unresolved_reason"]
+        f_flows = [f for f in f3 if f["root_id"].endswith("::dyn.f")]
+        assert len(f_flows) == 1 and f_flows[0]["kind"] == "source_only", f_flows
+        assert f_flows[0]["label"] == "delegator", f_flows[0]["label"]
+
+        # Chained-method collapse: "-".join(x.split()).lower() on one line -> 1 logical call.
+        (pkg / "chain.py").write_text(
+            "def slug(name):\n"
+            '    return "-".join(name.split()).lower()\n'
+        )
+        r4 = [safe_parse(p) for p in sorted(root.rglob("*.py"))]
+        for r in r4:
+            r.id = to_posix_rel(r.path, root)
+        _, f4 = build_call_edges_and_flows(r4, root)
+        slug_flows = [f for f in f4 if f["root_id"].endswith("::chain.slug")]
+        assert len(slug_flows) == 1 and slug_flows[0]["kind"] == "source_only", slug_flows
+        assert slug_flows[0]["label"] == "delegator", slug_flows[0]["label"]
+
+        # Bare-expression call (not in return) -> trivial, source_only.
+        (pkg / "bare.py").write_text(
+            "def touch(self, x):\n"
+            "    self.x = x\n"
+            "def attach(self, ext):\n"
+            "    self.handler = ext.make()\n"
+        )
+        r5 = [safe_parse(p) for p in sorted(root.rglob("*.py"))]
+        for r in r5:
+            r.id = to_posix_rel(r.path, root)
+        _, f5 = build_call_edges_and_flows(r5, root)
+        touch_flows = [f for f in f5 if f["root_id"].endswith("::bare.touch")]
+        assert len(touch_flows) == 1 and touch_flows[0]["kind"] == "source_only", touch_flows
+        assert touch_flows[0]["label"] == "pure function", touch_flows[0]["label"]
+        # attach has 1 call (ext.make()) not in return -> bare expression -> trivial.
+        attach_flows = [f for f in f5 if f["root_id"].endswith("::bare.attach")]
+        assert len(attach_flows) == 1 and attach_flows[0]["kind"] == "source_only", attach_flows
+        assert attach_flows[0]["label"] == "pure function", attach_flows[0]["label"]
 
     print("flows self-check ok")
 
