@@ -79,3 +79,19 @@
 - **Gap:** `graps/public/` should be `frontend/` at repo root. Only `graps/server/app.py` references the path.
 - **Affected:** `graps/public/` → `frontend/` (git mv), `graps/server/app.py` (1 line)
 - **Status:** Open — entity created in `08-refactor-and-enhancement/ref-0010-frontend-relocation.md`.
+
+## REF-0011: Tree-sitter adapter — extract calls + branches for non-Python
+
+- **Source:** spike-flow-classification RnD session (2026-07-22) — `01-discovery/spike-flow-classification.md` evidence boundary
+- **Severity:** High — blocks cross-language validation of flow-worthiness taxonomy. Spike open question #1 ("does the 2-call threshold hold across languages?") is **unanswerable today**, not because the threshold is wrong but because the parser can't see the signal.
+- **Gap:** `graps/scanner/tree_sitter_parser.py::_extract_functions` (lines 110–141) populates `name / line_start / line_end / decorators / is_private / parent` only. **`calls`, `branches`, `routes` are silently empty for ALL non-Python files** (JS/TS/Go/Rust). This is the parser-dispatch-parity pitfall: parser "succeeds" but returns less data than the Python `ast_parser` — downstream consumers (flow builder, taxonomy classifier) get silent empty results.
+- **Evidence (inline, 2026-07-22):** `probe_classifier.py` run against `tests/fixtures/{javascript,typescript,go,rust}/*` — 14 non-Python functions scanned, **0 calls, 0 branches** across every one. Under the proposed taxonomy, every non-Python function would route to Source — silent regression invisible to the user (they'd see Source tabs where Flow is expected).
+- **Scope of fix:**
+  1. Walk tree-sitter `call_expression` + `member_expression` nodes → populate `ParsedFunction.calls` (per-language name extraction rules: Python `foo()`, JS/TS `foo()` / `obj.method()`, Go `pkg.Func()` / `recv.Method()`, Rust `foo()` / `Path::func()`).
+  2. Walk `if_statement` / `for_statement` / `while_statement` / `try_statement` (and per-language equivalents: JS `try/catch`, Go `for/range/select`, Rust `match/loop`) → populate `ParsedFunction.branches` with `ParsedBranch(kind, line)`.
+  3. HTTP route detection (decorators for JS/TS, attributes for Go/Rust) → populate `routes`. Lower priority — can phase in after (1) and (2).
+- **Blocks:** `spike-flow-classification.md` evidence-boundary step 1 (per-language fixture coverage) and open question #1. Python-only MVP taxonomy ships without this; full cross-language validation requires it.
+- **Depends on:** nothing structural — adapter is self-contained. May need tree-sitter grammar query tuning per language (verify `ProcessResult` field availability — see ponytail skill `references/tree-sitter-language-pack-api.md`).
+- **Affected:** `graps/scanner/tree_sitter_parser.py` (`_extract_functions`, possibly new `_extract_calls` + `_extract_branches` helpers). No frontend/API changes — flows already consume `calls`/`branches`/`routes` uniformly.
+- **Verification:** re-run `probe_classifier.py` on non-Python fixtures after fix — expect non-zero `calls`/`branches` for fixtures that contain them (e.g. `tests/fixtures/typescript/class_methods.ts::add` should show 1 call, 0 branches).
+- **Status:** Open. Python-only taxonomy MVP (spike decision 2026-07-22) is **temporary scope, not final** — this backlog item is the path to lifting the Python-only restriction.
