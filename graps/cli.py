@@ -10,7 +10,6 @@ ponytail: tidak pakai Rich/Click/colorama. typer.echo + print biasa cukup.
 from __future__ import annotations
 
 import errno
-import logging
 import os
 import socket
 import tempfile
@@ -40,8 +39,6 @@ from graps.scanner.tree_sitter_parser import TreeSitterParser  # Phase 4
 from graps.server.app import create_app  # noqa: E402
 
 app = typer.Typer(add_completion=False)
-
-logger = logging.getLogger(__name__)
 
 # FEAT-0016: exclude .graps, VCS, dependencies, build dirs, and credential/binary
 # files from scanning. Dirs are matched by name on any path segment; credential
