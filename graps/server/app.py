@@ -49,8 +49,6 @@ from graps.ai.provider import AIError  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CACHE_PATH: Path = Path.cwd() / ".graps" / "cache.json"
-
 
 class SummaryRequest(BaseModel):
     """Body untuk ``POST /api/ai/summary`` (DEPRECATED Phase 5).
@@ -354,8 +352,9 @@ def create_app(
         Port yang akan dipakai uvicorn — dipakai untuk membentuk daftar origin
         & host yang sah (``localhost:<port>`` / ``127.0.0.1:<port>``).
     cache_path:
-        Lokasi file cache AI summary (DEPRECATED Phase 5). ``None`` →
-        :data:`DEFAULT_CACHE_PATH`. Caller (CLI) yang boleh memilih.
+        Lokasi file cache AI summary (DEPRECATED Phase 5, tidak dipakai —
+        logic cache sudah nonaktif). Dipertahankan hanya untuk backward-compat
+        signature.
     scan_root:
         Path absolut untuk baca source dari disk (Option C). ``None`` untuk
         backward-compat test yang tidak butuh baca source. Tidak masuk graph
