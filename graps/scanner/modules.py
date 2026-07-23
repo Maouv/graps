@@ -86,7 +86,6 @@ def resolve_modules(results: list[ParsedFile], root: Path) -> list[dict[str, Any
 if __name__ == "__main__":
     import tempfile
 
-    from graps.scanner import ParsedFunction, ParsedImport
     from graps.scanner.ast_parser import safe_parse
 
     with tempfile.TemporaryDirectory() as td:
