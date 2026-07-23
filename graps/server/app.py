@@ -138,25 +138,7 @@ def _format_function_metadata(fn: dict[str, Any], rel: str) -> str:
     ls = fn.get("line_start")
     le = fn.get("line_end")
     rng = f"{ls}-{le}" if ls and le else str(ls or "?")
-    callers = fn.get("callers") or []
-    callees = fn.get("callees") or []
-    risks = fn.get("risks") or []
-    params = fn.get("params") or []
-    returns = fn.get("returns")
-    lines = [f"Function: {name} ({rel}:{rng})"]
-    if callers:
-        lines.append("Called by: " + ", ".join(str(c) for c in callers))
-    if callees:
-        lines.append("Calls: " + ", ".join(str(c) for c in callees))
-    if params:
-        lines.append("Params: " + ", ".join(str(p) for p in params))
-    if returns:
-        lines.append(f"Returns: {returns}")
-    if risks:
-        lines.append("Risk flags: " + "; ".join(
-            r.get("message") or r.get("type") or str(r) for r in risks
-        ))
-    return "\n".join(lines)
+    return f"Function: {name} ({rel}:{rng})"
 
 
 def _format_file_metadata(node: dict[str, Any]) -> str:
@@ -253,7 +235,7 @@ def build_ai_context(
     """Assemble context dari tagged items untuk dikirim ke AI (Option C).
 
     Per tagged item (format ``"file.py"`` atau ``"file.py::function"``):
-    1. Graph metadata (callers, callees, risk flags, params, returns, range).
+    1. Graph metadata (name, line range).
     2. Source dari disk — function body kalau tag fungsi, file truncated
        kalau tag file.
     3. ``.env``/credential exclusion → skip source, catat warning.
