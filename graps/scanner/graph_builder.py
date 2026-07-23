@@ -43,11 +43,6 @@ def _resolved(imp: ParsedImport, current_file: Path, root: Path) -> Path | None:
     return _resolve_cache[key]
 
 
-def _rel(path: Path, root: Path) -> str:
-    """Path relative to root as POSIX str (M-03: never leak absolute paths)."""
-    return to_posix_rel(path, root)
-
-
 def _sanitized_constants(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Run every constant value through sanitize_constant_value (C-01)."""
     return [
