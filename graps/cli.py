@@ -180,7 +180,6 @@ def main(
         help="Network address to bind (default 127.0.0.1; 0.0.0.0 to expose on LAN/VPS)",
     ),
     no_browser: bool = typer.Option(False, "--no-browser", help="Not auto open brower"),
-    no_cache: bool = typer.Option(False, "--no-cache", help="Cache deleted (deletee by OS)"),
     exclude: list[str] = typer.Option(  # noqa: B008
         None, "--exclude", help="Skipped directory pattern (may repeat)",
     ),
@@ -266,24 +265,12 @@ def main(
         if not os.environ.get("ANTHROPIC_API_KEY"):
             typer.echo("  ! ANTHROPIC_API_KEY tidak di-set — AI summary akan disabled")
 
-    # Cache path. --no-cache → tempfile OS-unik per-run (mkstemp).
-    # ponytail: mkstemp lebih simple dari TemporaryDirectory context manager
-    # karena server.run() block — kita gak punya tempat clean up ergonomis.
-    # OS akan bersihkan /tmp eventually.
-    cache_path: Path | None
-    if no_cache:
-        fd, name = tempfile.mkstemp(suffix=".json", prefix="graps-nocache-")
-        os.close(fd)
-        cache_path = Path(name)
-    else:
-        cache_path = None  # cache logic deprecated, gak dipakai create_app
-
     # Pre-flight port check.
     if not _port_free(port, host):
         typer.echo(f"  Port {port} already in use. Try: graps . --port {port + 1}")
         raise typer.Exit(1)
 
-    fastapi_app = create_app(graph, port=port, host=host, cache_path=cache_path, scan_root=root)
+    fastapi_app = create_app(graph, port=port, host=host, scan_root=root)
 
     # Banner nunjukin bind asli (0.0.0.0 = denger semua interface, bukan
     # cuma loopback). webbrowser.open gak bisa buka 0.0.0.0 langsung → itu

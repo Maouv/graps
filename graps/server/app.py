@@ -16,13 +16,12 @@ sengaja expose, middleware di-relax karena Host/Origin LAN gak akan pernah
 cocok ``localhost``.
 
 ponytail: tidak pakai ``APIRouter``/DI framework — semua route di satu file,
-``cache_path`` + ``scan_root`` di-close-over dari ``create_app``. Pindah ke
+``scan_root`` di-close-over dari ``create_app``. Pindah ke
 router kalau endpoint sudah lewat ~10.
 """
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -46,8 +45,6 @@ if __name__ == "__main__":
 from graps import storage  # noqa: E402
 from graps.ai import provider as provider_module  # noqa: E402
 from graps.ai.provider import AIError  # noqa: E402
-
-logger = logging.getLogger(__name__)
 
 
 class SummaryRequest(BaseModel):
@@ -338,7 +335,6 @@ def build_ai_context(
 def create_app(
     graph_data: dict[str, Any],
     port: int,
-    cache_path: Path | None = None,
     scan_root: Path | None = None,
     host: str = "127.0.0.1",
 ) -> FastAPI:
@@ -351,10 +347,6 @@ def create_app(
     port:
         Port yang akan dipakai uvicorn — dipakai untuk membentuk daftar origin
         & host yang sah (``localhost:<port>`` / ``127.0.0.1:<port>``).
-    cache_path:
-        Lokasi file cache AI summary (DEPRECATED Phase 5, tidak dipakai —
-        logic cache sudah nonaktif). Dipertahankan hanya untuk backward-compat
-        signature.
     scan_root:
         Path absolut untuk baca source dari disk (Option C). ``None`` untuk
         backward-compat test yang tidak butuh baca source. Tidak masuk graph

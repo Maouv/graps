@@ -61,7 +61,7 @@ def ai_body():
 
 
 def _client(graph_data, tmp_path, port=PORT, scan_root=None):
-    app = create_app(graph_data, port=port, cache_path=tmp_path / "cache.json", scan_root=scan_root)
+    app = create_app(graph_data, port=port, scan_root=scan_root)
     return TestClient(app, base_url=f"http://127.0.0.1:{port}")
 
 
@@ -132,8 +132,7 @@ def test_security__non_loopback_host_relaxes_middleware(simple_graph, tmp_path):
     cabang relax-nya gak rusak kalau ada refactor.
     """
     lan = "192.168.1.10"
-    app = create_app(simple_graph, port=PORT, host="0.0.0.0",
-                     cache_path=tmp_path / "cache.json", scan_root=tmp_path)
+    app = create_app(simple_graph, port=PORT, host="0.0.0.0", scan_root=tmp_path)
     client = TestClient(app, base_url=f"http://{lan}:{PORT}")
     # GET dari LAN Host → 200 (validate_host di-relax).
     r = client.get("/api/graph", headers=_hdr(host=f"{lan}:{PORT}"))
@@ -716,8 +715,8 @@ def test_build_ai_context__credential_plus_legit_mixed(simple_graph, tmp_path):
     assert "def foo" in ctx, ctx
 
 
-def test_summary__deprecated_ignores_cache_path(simple_graph, tmp_path, ai_body):
-    """Deprecated /api/ai/summary must not read/write cache even with cache_path set."""
+def test_summary__deprecated_never_creates_cache_file(simple_graph, tmp_path, ai_body):
+    """Deprecated /api/ai/summary must not read/write any cache — no cache_path param exists anymore."""
     cache = tmp_path / "cache.json"
     assert not cache.exists()
     r = _client(simple_graph, tmp_path, scan_root=tmp_path).post(
