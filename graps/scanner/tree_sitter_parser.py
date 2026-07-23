@@ -1,10 +1,10 @@
-"""Tree-sitter multi-language parser — Phase 4 adapter (BLUEPRINT §4).
+"""Tree-sitter multi-language parser — Phase 4 adapter.
 
 Adapter over tree-sitter-language-pack's ``process()`` API. Maps
 ``ProcessResult`` → ``ParsedFile``. No manual tree walking — library handles
 306 languages, grammar download, and code intelligence.
 
-Implements BaseParser Protocol. One instance per scan session.
+Used by cli.py's non-Python dispatch path. One instance per scan session.
 """
 
 from __future__ import annotations
@@ -17,20 +17,15 @@ from graps.scanner import ParsedFile, ParsedFunction, ParsedImport
 
 logger = logging.getLogger(__name__)
 
-_MAX_BYTES = 1_000_000  # 1MB — konsisten dengan ASTParser
+_MAX_BYTES = 1_000_000  # 1MB — konsisten dengan safe_parse (ast_parser.py)
 
 
 class TreeSitterParser:
     """Multi-language parser via tree-sitter-language-pack.
 
     Grammar di-load lazily (on-demand download + local cache).
-    implements BaseParser Protocol.
+    Dispatch (cli.py) route by file suffix, bukan lewat Protocol polymorphism.
     """
-
-    def supported_extensions(self) -> list[str]:
-        # ponytail: detect_language_from_path() handle 306 bahasa.
-        # Return [] = "cek via detect_language_from_path()".
-        return []
 
     def parse_file(self, path: Path, root: Path) -> ParsedFile | None:
         """Parse satu file. Return None kalau unsupported/failed."""
@@ -123,8 +118,6 @@ def _extract_functions(structure: list[Any]) -> list[ParsedFunction]:
             span = item.span
             results.append(ParsedFunction(
                 name=name,
-                params=[],           # ponytail: parse dari signature nanti
-                returns=None,
                 line_start=(span.start_line + 1) if span else 0,
                 line_end=(span.end_line + 1) if span else 0,
                 decorators=list(item.decorators) if item.decorators else [],

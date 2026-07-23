@@ -26,7 +26,7 @@ _TIMEOUT_S = 5          # Section 14
 # forbids graph_builder+above from importing the concrete *parser*; data
 # carriers may be re-exported.
 __all__ = [
-    "safe_parse", "ASTParser",
+    "safe_parse",
     "ParsedFile", "ParsedFunction", "ParsedImport",
     "ParsedCall", "ParsedBranch", "ParsedRoute", "ParseResult",
 ]
@@ -88,28 +88,6 @@ def safe_parse(path: Path) -> ParsedFile:
     parsed.path = path
     parsed.warnings = result.warnings + parsed.warnings
     return parsed
-
-
-class ASTParser:
-    """Python stdlib ``ast`` parser implementing BaseParser (BLUEPRINT §4).
-
-    Adapter over module-level :func:`safe_parse`: keeps the proven guarded parse
-    path while exposing the Protocol shape Phase 4 cli dispatch needs. Always
-    returns a ParsedFile (warnings populated on failure); the ``| None`` in the
-    Protocol is reserved for future parsers that skip unsupported files.
-    """
-
-    def parse_file(self, path: Path, root: Path) -> ParsedFile | None:
-        pf = safe_parse(path)
-        # ponytail: id = path relative to root (BLUEPRINT §4); mirrors graph_builder._rel.
-        try:
-            pf.id = str(path.resolve().relative_to(root.resolve()))
-        except ValueError:
-            pf.id = str(path)
-        return pf
-
-    def supported_extensions(self) -> list[str]:
-        return [".py"]
 
 
 # --- Visitor (stdlib ast.NodeVisitor dispatch) -------------------------------

@@ -218,10 +218,6 @@ class TestFailureModes:
     def test_nonexistent_file(self, parser: TreeSitterParser, tmp_path: Path) -> None:
         assert parser.parse_file(tmp_path / "nope.py", tmp_path) is None
 
-    def test_supported_extensions(self, parser: TreeSitterParser) -> None:
-        # Protocol compliance — returns []
-        assert parser.supported_extensions() == []
-
 
 # ── Line numbers are 1-indexed ───────────────────────────────────────
 

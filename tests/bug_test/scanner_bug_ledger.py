@@ -15,7 +15,7 @@ import threading
 from pathlib import Path
 
 from graps.scanner import ParsedFile, ParsedFunction, ParsedImport
-from graps.scanner.ast_parser import ASTParser, safe_parse
+from graps.scanner.ast_parser import safe_parse
 from graps.scanner.graph_builder import build_graph, _resolve_cache
 from graps.scanner.resolver import resolve_import, resolve_safe
 from graps.scanner.risk_analyzer import _check_circular_imports, analyze_risks
