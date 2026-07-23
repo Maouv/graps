@@ -147,6 +147,7 @@ class _ScannerVisitor(ast.NodeVisitor):
             line_end=end_line,
             is_nested=is_nested,
             is_property=any(_decorator_name(d) == "property" for d in node.decorator_list),
+            is_private=node.name.startswith("_"),
             decorators=[_decorator_name(d) for d in node.decorator_list],
             parent=".".join(self._scope) if self._kind[-1] != "module" else None,
             calls=[],

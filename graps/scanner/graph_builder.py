@@ -136,7 +136,7 @@ def _build_functions(results: list[ParsedFile], root: Path) -> list[dict[str, An
                 "line_start": ls,
                 "line_end": f.line_end or ls,
                 "decorators": list(f.decorators),
-                "is_private": f.name.startswith("_"),
+                "is_private": f.is_private,
                 "is_nested": f.is_nested,
                 "is_property": f.is_property,
                 "parent": f.parent,
@@ -380,5 +380,3 @@ if __name__ == "__main__":
                    for e in g["edges"]["calls"]), g["edges"]["calls"]
 
     print("graph_builder self-check ok")
-
-
