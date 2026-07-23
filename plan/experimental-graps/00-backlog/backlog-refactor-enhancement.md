@@ -95,3 +95,20 @@
 - **Affected:** `graps/scanner/tree_sitter_parser.py` (`_extract_functions`, possibly new `_extract_calls` + `_extract_branches` helpers). No frontend/API changes — flows already consume `calls`/`branches`/`routes` uniformly.
 - **Verification:** re-run `probe_classifier.py` on non-Python fixtures after fix — expect non-zero `calls`/`branches` for fixtures that contain them (e.g. `tests/fixtures/typescript/class_methods.ts::add` should show 1 call, 0 branches).
 - **Status:** Open. Python-only taxonomy MVP (spike decision 2026-07-22) is **temporary scope, not final** — this backlog item is the path to lifting the Python-only restriction.
+
+## REF-0012: Vue/Svelte SFC — 2-pass script extraction for flow classification
+
+- **Source:** REF-0011 cross-language architecture session (2026-07-23) — `other/raangkuman.md` + live probe
+- **Severity:** Medium — Vue/Svelte files parse but `<script>` content is invisible to the walker
+- **Gap:** `tree_sitter_parser.py` + generic walker (REF-0011) sees Vue SFC `<script>` block as `raw_text`, not parsed AST. Calls/branches inside Vue `<script setup>` or Svelte `<script>` are **not extracted** — taxonomy classifies all Vue/Svelte functions as not-flow-worthy (silent regression).
+- **Evidence (inline, 2026-07-23):** `get_parser('vue').parse(vue_sfc)` → `script_element.raw_text` contains JS/TS source as plain string, no child nodes. `find_calls` on raw_text returns 0. Confirmed with live probe: `const x = ref(0); function inc() { x.value++; }` inside `<script setup>` → 0 calls detected.
+- **Scope of fix:**
+  1. Detect SFC languages (`vue`, `svelte`) in walker dispatch.
+  2. Extract `raw_text` from `script_element` nodes.
+  3. Re-parse extracted content with `get_parser('typescript')` (or `javascript` if no `lang` attr).
+  4. Walk re-parsed tree for calls/branches, map line numbers back to original file.
+- **Blocks:** Full cross-language taxonomy validation for Vue/Svelte. Spike open question #1 (threshold across languages) remains partially unanswerable until this closes.
+- **Depends on:** REF-0011 (walker infrastructure must exist first).
+- **Affected:** `graps/scanner/tree_sitter_parser.py` (new `_extract_script_blocks` helper), walker dispatch logic.
+- **Verification:** Probe `tests/fixtures/vue/` + `tests/fixtures/svelte/` — expect non-zero calls for fixtures with `<script>` content (e.g. `console.log`, `fetch`, event handlers).
+- **Status:** Open. Backlogged to keep REF-0011 scope tight (14 core languages first).
