@@ -276,7 +276,7 @@ def main(
         os.close(fd)
         cache_path = Path(name)
     else:
-        cache_path = None  # create_app pakai DEFAULT_CACHE_PATH
+        cache_path = None  # cache logic deprecated, gak dipakai create_app
 
     # Pre-flight port check.
     if not _port_free(port, host):
